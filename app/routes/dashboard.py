@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from flask import Blueprint, current_app, jsonify, render_template, request, url_for
 
 from app.config import (
@@ -24,12 +26,23 @@ def _refresh_runtime_config(updates: dict) -> None:
         "QGENIE_PROVIDER_URL": "QGENIE_PROVIDER_URL",
         "QGENIE_DEFAULT_MODEL": "QGENIE_DEFAULT_MODEL",
         "QGENIE_AVAILABLE_MODELS": "QGENIE_AVAILABLE_MODELS",
+        "QGENIE_SSL_VERIFY": "QGENIE_SSL_VERIFY",
+        "QGENIE_CA_BUNDLE": "QGENIE_CA_BUNDLE",
         "USER_DISPLAY_NAME": "USER_DISPLAY_NAME",
         "KERNEL_SRC_PATH": "KERNEL_SRC_PATH",
     }
     for env_key, config_key in config_key_map.items():
         if env_key in updates:
             current_app.config[config_key] = updates[env_key]
+
+    verify_ssl = str(current_app.config.get("QGENIE_SSL_VERIFY", "true")).lower() == "true"
+    ca_bundle = (current_app.config.get("QGENIE_CA_BUNDLE") or "").strip()
+    if verify_ssl and ca_bundle:
+        os.environ["REQUESTS_CA_BUNDLE"] = ca_bundle
+        os.environ["SSL_CERT_FILE"] = ca_bundle
+    else:
+        os.environ.pop("REQUESTS_CA_BUNDLE", None)
+        os.environ.pop("SSL_CERT_FILE", None)
 
 
 @dashboard_bp.get("/")
@@ -64,6 +77,8 @@ def setup_page():
         "setup.html",
         default_username=env_values.get("USER_DISPLAY_NAME") or current_username(),
         provider_url=env_values.get("QGENIE_PROVIDER_URL") or Config.QGENIE_PROVIDER_URL,
+        ssl_verify=env_values.get("QGENIE_SSL_VERIFY", "true"),
+        ca_bundle=env_values.get("QGENIE_CA_BUNDLE", ""),
     )
 
 
@@ -72,7 +87,9 @@ def validate_setup_key():
     payload = request.get_json() or {}
     api_key = payload.get("api_key", "")
     provider_url = payload.get("provider_url", Config.QGENIE_PROVIDER_URL)
-    ok, message = validate_qgenie_key(api_key, provider_url)
+    ssl_verify = payload.get("ssl_verify", "true")
+    ca_bundle = payload.get("ca_bundle", "")
+    ok, message = validate_qgenie_key(api_key, provider_url, ssl_verify=ssl_verify, ca_bundle=ca_bundle)
     return jsonify({"ok": ok, "message": message}), (200 if ok else 400)
 
 
@@ -82,8 +99,10 @@ def save_setup():
     api_key = payload.get("api_key", "").strip()
     provider_url = payload.get("provider_url", Config.QGENIE_PROVIDER_URL).strip()
     user_display_name = payload.get("user_display_name", "").strip() or current_username()
+    ssl_verify = "true" if str(payload.get("ssl_verify", "true")).lower() == "true" else "false"
+    ca_bundle = payload.get("ca_bundle", "").strip()
 
-    ok, message = validate_qgenie_key(api_key, provider_url)
+    ok, message = validate_qgenie_key(api_key, provider_url, ssl_verify=ssl_verify, ca_bundle=ca_bundle)
     if not ok:
         return jsonify({"ok": False, "message": message}), 400
 
@@ -91,6 +110,8 @@ def save_setup():
         "QGENIE_API_KEY": api_key,
         "QGENIE_PROVIDER_URL": provider_url,
         "USER_DISPLAY_NAME": user_display_name,
+        "QGENIE_SSL_VERIFY": ssl_verify,
+        "QGENIE_CA_BUNDLE": ca_bundle,
     }
     save_env_values(updates)
     _refresh_runtime_config(updates)
@@ -117,12 +138,21 @@ def save_settings():
         "USER_DISPLAY_NAME": (payload.get("user_display_name") or "").strip(),
         "QGENIE_DEFAULT_MODEL": (payload.get("default_model") or "auto").strip(),
         "KERNEL_SRC_PATH": (payload.get("kernel_src_path") or Config.KERNEL_SRC_PATH).strip(),
+        "QGENIE_SSL_VERIFY": "true"
+        if str(payload.get("ssl_verify", "true")).lower() == "true"
+        else "false",
+        "QGENIE_CA_BUNDLE": (payload.get("ca_bundle") or "").strip(),
     }
 
     api_key = (payload.get("api_key") or "").strip()
     provider_url = (payload.get("provider_url") or Config.QGENIE_PROVIDER_URL).strip()
     if api_key:
-        ok, message = validate_qgenie_key(api_key, provider_url)
+        ok, message = validate_qgenie_key(
+            api_key,
+            provider_url,
+            ssl_verify=updates["QGENIE_SSL_VERIFY"],
+            ca_bundle=updates["QGENIE_CA_BUNDLE"],
+        )
         if not ok:
             return jsonify({"ok": False, "message": message}), 400
         updates["QGENIE_API_KEY"] = api_key

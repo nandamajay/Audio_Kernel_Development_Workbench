@@ -14,6 +14,15 @@
     <label>Provider URL</label>
     <input id="providerUrl" class="input" value="{{ values.get('QGENIE_PROVIDER_URL', '') }}">
 
+    <label>SSL Verify</label>
+    <select id="sslVerify" class="input">
+      <option value="true" {% if values.get('QGENIE_SSL_VERIFY', 'true') == 'true' %}selected{% endif %}>true (recommended)</option>
+      <option value="false" {% if values.get('QGENIE_SSL_VERIFY', 'true') == 'false' %}selected{% endif %}>false (temporary workaround)</option>
+    </select>
+
+    <label>CA Bundle Path (optional)</label>
+    <input id="caBundle" class="input" value="{{ values.get('QGENIE_CA_BUNDLE', '') }}" placeholder="/app/certs/qcom-ca-chain.crt">
+
     <label>Default Model</label>
     <select id="defaultModel" class="input">
       {% for model in models %}
@@ -51,6 +60,8 @@
       user_display_name: document.getElementById('displayName').value,
       api_key: document.getElementById('apiKey').value,
       provider_url: document.getElementById('providerUrl').value,
+      ssl_verify: document.getElementById('sslVerify').value,
+      ca_bundle: document.getElementById('caBundle').value,
       default_model: document.getElementById('defaultModel').value,
       kernel_src_path: document.getElementById('kernelSrcPath').value,
     };

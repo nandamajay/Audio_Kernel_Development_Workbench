@@ -12,6 +12,15 @@
     <label>Provider URL</label>
     <input id="providerUrl" class="input" value="{{ provider_url }}">
 
+    <label>SSL Verify</label>
+    <select id="sslVerify" class="input">
+      <option value="true" {% if ssl_verify == 'true' %}selected{% endif %}>true (recommended)</option>
+      <option value="false" {% if ssl_verify == 'false' %}selected{% endif %}>false (temporary workaround)</option>
+    </select>
+
+    <label>CA Bundle Path (optional)</label>
+    <input id="caBundle" class="input" value="{{ ca_bundle }}" placeholder="/app/certs/qcom-ca-chain.crt">
+
     <label>QGenie API Key</label>
     <div class="password-row">
       <input id="apiKey" class="input" type="password" placeholder="Enter API key">
@@ -47,6 +56,8 @@
       body: JSON.stringify({
         api_key: apiKey.value,
         provider_url: document.getElementById('providerUrl').value,
+        ssl_verify: document.getElementById('sslVerify').value,
+        ca_bundle: document.getElementById('caBundle').value,
       })
     });
     const data = await resp.json();
@@ -67,6 +78,8 @@
         api_key: apiKey.value,
         provider_url: document.getElementById('providerUrl').value,
         user_display_name: document.getElementById('displayName').value,
+        ssl_verify: document.getElementById('sslVerify').value,
+        ca_bundle: document.getElementById('caBundle').value,
       })
     });
     const data = await resp.json();

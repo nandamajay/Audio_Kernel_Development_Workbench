@@ -10,6 +10,7 @@ services:
       - /local/mnt/workspace/AUDIO_KERNEL_DEVELOPMENT_WORKBENCH(AKDW)/kernel:/app/kernel:rw
       - /local/mnt/workspace/AUDIO_KERNEL_DEVELOPMENT_WORKBENCH(AKDW)/sessions:/app/sessions:rw
       - /local/mnt/workspace/AUDIO_KERNEL_DEVELOPMENT_WORKBENCH(AKDW)/patches:/app/patches:rw
+      - ./certs:/app/certs:ro
       - ~/.gitconfig:/root/.gitconfig:ro
       - ~/.ssh:/root/.ssh:ro
     env_file:

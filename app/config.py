@@ -41,6 +41,8 @@ class Config:
     QGENIE_PROVIDER_URL = os.getenv("QGENIE_PROVIDER_URL", "https://qgenie-chat.qualcomm.com/v1")
     QGENIE_DEFAULT_MODEL = os.getenv("QGENIE_DEFAULT_MODEL", "auto")
     QGENIE_AVAILABLE_MODELS = os.getenv("QGENIE_AVAILABLE_MODELS", DEFAULT_MODELS)
+    QGENIE_SSL_VERIFY = os.getenv("QGENIE_SSL_VERIFY", "true").lower() == "true"
+    QGENIE_CA_BUNDLE = os.getenv("QGENIE_CA_BUNDLE", "")
 
     USER_DISPLAY_NAME = os.getenv("USER_DISPLAY_NAME", "")
 
@@ -94,3 +96,14 @@ def is_first_run() -> bool:
     if not ENV_PATH.exists():
         return True
     return os.getenv("QGENIE_API_KEY", "").strip() == ""
+
+
+def get_qgenie_verify() -> bool | str:
+    verify_ssl = os.getenv("QGENIE_SSL_VERIFY", "true").lower() == "true"
+    if not verify_ssl:
+        return False
+
+    ca_bundle = os.getenv("QGENIE_CA_BUNDLE", "").strip()
+    if ca_bundle:
+        return ca_bundle
+    return True

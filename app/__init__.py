@@ -24,6 +24,7 @@ migrate = Migrate()
 def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
+    _apply_qgenie_tls_env(app)
 
     db.init_app(app)
     migrate.init_app(app, db)
@@ -73,3 +74,14 @@ def _ensure_directories(app):
     for root in roots:
         if root:
             os.makedirs(root, exist_ok=True)
+
+
+def _apply_qgenie_tls_env(app):
+    verify_ssl = str(app.config.get("QGENIE_SSL_VERIFY", True)).lower() == "true"
+    ca_bundle = (app.config.get("QGENIE_CA_BUNDLE") or "").strip()
+    if verify_ssl and ca_bundle:
+        os.environ["REQUESTS_CA_BUNDLE"] = ca_bundle
+        os.environ["SSL_CERT_FILE"] = ca_bundle
+    else:
+        os.environ.pop("REQUESTS_CA_BUNDLE", None)
+        os.environ.pop("SSL_CERT_FILE", None)
