@@ -1,0 +1,29 @@
+section	test	result	notes
+SECTION 0	0a git baseline	PASS	git log/status captured
+SECTION 0	0b checkpoint commit	PASS	commit 9e430de created
+SECTION 0	0c QGenie reachability	PASS	BASELINE API STATUS: 200
+SECTION 0	0d email method detection	PASS	sendmail available; SMTP relay unavailable from container
+SECTION 1	T1.1 /api/agent/chat returns response keys	PASS	response includes content/message
+SECTION 1	T1.2 forbidden patterns in agent.html	PASS	grep count 0
+SECTION 1	T1.3 thinking-bubble + scroll markers	PASS	grep count 7
+SECTION 1	T1.4 DOMContentLoaded + createNewSession	PASS	grep count 4
+SECTION 2	T2.1 pw-file-input exists	PASS	count 1
+SECTION 2	T2.2 drag handlers in patchwise	PASS	template/js counts 1+5
+SECTION 2	T2.3 browse click wiring in patchwise	PASS	js count 2
+SECTION 2	T2.4 editor browse regression check	PASS	template/js counts 1+2
+SECTION 3	T3.1 TLS test (no SSL error)	PASS	TLS+AUTH status 200
+SECTION 3	T3.2 no module-level OpenAI singletons	PASS	grep found 0 matches
+SECTION 4	T4.1 /patchwise HTTP status	PASS	200
+SECTION 4	T4.2 /api/patchwise/review findings	PASS	findings key present
+SECTION 4	T4.3 /api/evidence/lkml_preview title	PASS	title returned
+SECTION 4	T4.4 review_evidence table exists	PASS	True
+SECTION 4	T4.5 export endpoint exists	PASS	200
+SECTION 4	T4.6 attach_screenshot accepts POST	PASS	evidence_id returned
+SECTION 5	T5.1 drag-and-drop handlers in both templates	PASS	editor=4 patchwise=4
+SECTION 5	T5.2 file input elements in both templates	PASS	editor=1 patchwise=1
+SECTION 6	6a all pages load 200	PASS	/,/editor/,/patchwise/,/triage/,/converter/,/agent/,/settings/ all 200
+SECTION 6	6b agent response length check	PASS	length 11729
+SECTION 6	6c patchwise review end-to-end	PASS	findings key present count 13
+SECTION 6	6d settings API save/load round-trip	PASS	settings save returned ok true
+SECTION 6	6e evidence round-trip	PASS	attach/list/delete succeeded
+SECTION 6	6f container stability	PASS	container Up healthy; no critical errors in recent logs

@@ -137,6 +137,7 @@ def save_setup():
 
 
 @dashboard_bp.get("/settings")
+@dashboard_bp.get("/settings/")
 def settings_page():
     env_values = load_env_values()
     models = get_available_models()
@@ -181,7 +182,7 @@ def save_settings():
 
     save_env_values(updates)
     _refresh_runtime_config(updates)
-    return jsonify({"ok": True, "message": "Settings saved"})
+    return jsonify({"ok": True, "success": True, "message": "Settings saved"})
 
 
 @dashboard_bp.get("/api/models")

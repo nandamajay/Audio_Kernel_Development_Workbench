@@ -103,5 +103,7 @@ def agent_chat_api():
             "session_id": session_id,
             "model": model,
             "response": result.get("response", ""),
+            "content": result.get("response", ""),
+            "message": result.get("response", ""),
         }
     )

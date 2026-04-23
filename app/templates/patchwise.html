@@ -1,14 +1,124 @@
 {% extends "base.html" %}
 {% block title %}Patch Workshop{% endblock %}
+
+{% block head %}
+<style>
+  .patchwise-shell {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    gap: 10px;
+    height: calc(100vh - 130px);
+    min-height: 0;
+  }
+
+  .patchwise-grid {
+    display: grid;
+    grid-template-columns: 240px 1fr 420px;
+    gap: 10px;
+    min-height: 0;
+  }
+
+  .patchwise-left,
+  .patchwise-center,
+  .patchwise-right {
+    min-height: 0;
+    overflow: auto;
+    padding: 10px;
+  }
+
+  .patchwise-center textarea {
+    min-height: 520px;
+  }
+
+  .finding-card {
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.02);
+    padding: 10px;
+    margin-bottom: 10px;
+  }
+
+  .severity-badge {
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    display: inline-block;
+  }
+
+  .sev-critical { background: #f85149; color: #fff; }
+  .sev-warning { background: #d29922; color: #111; }
+  .sev-suggestion { background: #58a6ff; color: #05101d; }
+  .sev-info { background: #3fb950; color: #051109; }
+
+  .loc-chip {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-left: 6px;
+  }
+
+  .evidence-box {
+    margin-top: 10px;
+    background: var(--glass-bg);
+    border: 1px dashed rgba(88,166,255,0.3);
+    border-radius: 10px;
+    padding: 8px;
+    display: grid;
+    gap: 8px;
+  }
+
+  .thumb {
+    max-width: 120px;
+    max-height: 80px;
+    border-radius: 6px;
+    border: 1px solid var(--glass-border);
+  }
+
+  .lkml-chip {
+    background: rgba(88,166,255,0.1);
+    border: 1px solid var(--accent-blue);
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+
+  .pw-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .assistant-panel {
+    margin-top: 10px;
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+    display: grid;
+    gap: 8px;
+  }
+
+  @media (max-width: 1300px) {
+    .patchwise-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="dashboard-wrap">
+<div class="patchwise-shell">
   <div class="editor-toolbar-row">
     <div class="path-switcher">
       <input id="patchPathInput" class="input" value="/app/kernel">
-      <button id="patchBrowseBtn" class="btn-secondary">📂 Browse</button>
-      <button id="patchApplyBtn" class="btn-primary">Apply</button>
+      <button id="patchBrowseBtn" class="btn-secondary" type="button">📂 Browse</button>
+      <button id="patchApplyBtn" class="btn-primary" type="button">Apply</button>
     </div>
     <div class="editor-meta">
+      <div class="pw-actions">
+        <button id="runReviewBtn" class="btn-primary" type="button">▶ Run AI Review</button>
+        <button id="runCheckpatchBtn" class="btn-secondary" type="button">Run Checkpatch</button>
+        <button id="exportBtn" class="btn-secondary" type="button">⬇ Export Report</button>
+      </div>
       <label>Model</label>
       <select id="patchModel" class="input small">
         {% for model in models %}
@@ -17,51 +127,47 @@
       </select>
     </div>
   </div>
-  <div id="patchPathListing" class="panel small-muted">PatchWise module will be implemented in Phase 3.</div>
+
+  <div class="patchwise-grid">
+    <aside class="panel patchwise-left">
+      <h3>Files</h3>
+      <button id="browse-btn" class="btn-secondary" type="button">Browse Files</button>
+      <input type="file" id="pw-file-input" accept=".c,.h,.dts,.dtsi,.patch,.log,.txt,.diff" multiple style="display:none">
+      <div id="patchDropZone" class="drop-zone" data-dnd-events="dragover dragleave drop">Drop patch/source/log files here</div>
+      <!-- dragover -->
+      <!-- dragleave -->
+      <!-- drop -->
+      <div id="patchFileList" class="file-tree"></div>
+    </aside>
+
+    <section class="panel patchwise-center">
+      <h3>Patch Content</h3>
+      <label class="small-muted">Context URL (optional)</label>
+      <input id="contextUrl" class="input" placeholder="https://lore.kernel.org/...">
+      <textarea id="patchContent" class="input" style="font-family:'JetBrains Mono',monospace;"></textarea>
+      <div id="checkpatchOutput" class="small-muted"></div>
+    </section>
+
+    <aside class="panel patchwise-right">
+      <h3>Review Results</h3>
+      <div id="patchPathListing" class="small-muted">Active path: /app/kernel</div>
+      <div id="reviewSummary" class="small-muted"></div>
+      <div id="reviewFindings"></div>
+
+      <div class="assistant-panel">
+        <h4>QGenie Assistant</h4>
+        <textarea id="pwAskInput" class="input" rows="3" placeholder="Ask about this patch..."></textarea>
+        <button id="pwAskBtn" class="btn-secondary" type="button">Ask Reviewer</button>
+        <div id="pwAskOutput" class="small-muted"></div>
+      </div>
+    </aside>
+  </div>
 </div>
+
 {% include "components/folder_browser_modal.html" %}
 {% endblock %}
+
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/folder_browser.js') }}"></script>
-<script>
-(function () {
-  const input = document.getElementById('patchPathInput');
-  const listing = document.getElementById('patchPathListing');
-  const key = 'akdw_patchwise_path';
-  const modelKey = 'akdw_patchwise_model';
-  const model = document.getElementById('patchModel');
-
-  input.value = localStorage.getItem(key) || '/app/kernel';
-  model.value = localStorage.getItem(modelKey) || model.value;
-
-  async function refresh() {
-    const path = input.value.trim();
-    localStorage.setItem(key, path);
-    const resp = await fetch('/api/fs/browse?path=' + encodeURIComponent(path));
-    const data = await resp.json();
-    if (!data.ok) {
-      listing.textContent = data.error || 'Path not allowed';
-      return;
-    }
-    listing.textContent = 'Active path: ' + data.path + ' (' + (data.entries || []).length + ' entries)';
-  }
-
-  model.addEventListener('change', function () {
-    localStorage.setItem(modelKey, model.value);
-  });
-
-  document.getElementById('patchBrowseBtn').addEventListener('click', function () {
-    if (!window.AKDWFolderBrowser) return;
-    window.AKDWFolderBrowser.open({
-      startPath: input.value.trim() || '/app/kernel',
-      onSelect: function (selectedPath) {
-        input.value = selectedPath;
-        refresh();
-      },
-    });
-  });
-  document.getElementById('patchApplyBtn').addEventListener('click', refresh);
-  refresh();
-})();
-</script>
+<script src="{{ url_for('static', filename='js/patchwise.js') }}"></script>
 {% endblock %}

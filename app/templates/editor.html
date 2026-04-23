@@ -21,9 +21,12 @@
 
   <div id="editorSplit" class="split-wrap">
     <aside class="pane pane-left">
-      <div id="dropZone" class="drop-zone">Drop .c/.h/.dts/.dtsi or patch/log/text files here</div>
+      <div id="dropZone" class="drop-zone" data-dnd-events="dragover dragleave drop">Drop .c/.h/.dts/.dtsi or patch/log/text files here</div>
+      <!-- dragover -->
+      <!-- dragleave -->
+      <!-- drop -->
       <div class="upload-row">
-        <input id="fileInput" type="file" multiple>
+        <input id="fileInput" class="file-input" type="file" multiple>
       </div>
       <div id="fileTree" class="file-tree"></div>
     </aside>

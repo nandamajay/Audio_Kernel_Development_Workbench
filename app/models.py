@@ -63,3 +63,34 @@ class Message(db.Model):
     tool_name = db.Column(db.String(128), nullable=True)
     tool_args = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ReviewSession(db.Model):
+    __tablename__ = "review_sessions"
+
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    patch_hash = db.Column(db.String(128), nullable=False)
+    summary = db.Column(db.Text, nullable=True)
+    findings_json = db.Column(db.Text, nullable=False, default="[]")
+    checkpatch_output = db.Column(db.Text, nullable=True)
+    maintainers_json = db.Column(db.Text, nullable=True, default="[]")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+
+class ReviewEvidence(db.Model):
+    __tablename__ = "review_evidence"
+
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.String(64), nullable=False)
+    finding_id = db.Column(db.String(128), nullable=False)
+    evidence_type = db.Column(db.String(20), nullable=False)  # screenshot|lkml
+    content = db.Column(db.Text, nullable=False)  # base64 or URL
+    metadata_json = db.Column(db.Text, nullable=True, default="{}")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)

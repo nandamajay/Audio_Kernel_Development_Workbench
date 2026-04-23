@@ -5,6 +5,7 @@ from app.routes.api import api_bp
 from app.routes.converter import converter_bp
 from app.routes.dashboard import dashboard_bp
 from app.routes.editor import editor_bp
+from app.routes.evidence import evidence_bp
 from app.routes.patchwise import patchwise_bp
 from app.routes.triage import triage_bp
 
@@ -12,6 +13,7 @@ from app.routes.triage import triage_bp
 ALL_BLUEPRINTS = [
     dashboard_bp,
     api_bp,
+    evidence_bp,
     editor_bp,
     patchwise_bp,
     converter_bp,

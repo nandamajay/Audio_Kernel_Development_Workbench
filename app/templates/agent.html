@@ -1,164 +1,442 @@
 {% extends "base.html" %}
 {% block title %}QGenie Agent{% endblock %}
 
+{% block head %}
+<style>
+  .chat-shell {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    gap: 12px;
+    height: calc(100vh - 130px);
+    min-height: 0;
+  }
+
+  .session-sidebar,
+  .chat-pane {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    min-height: 0;
+  }
+
+  .session-sidebar {
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+    gap: 10px;
+    padding: 10px;
+    overflow: auto;
+  }
+
+  .session-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .session-groups {
+    display: grid;
+    gap: 10px;
+  }
+
+  .session-group {
+    display: grid;
+    gap: 6px;
+  }
+
+  .session-group h4 {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 12px;
+    text-transform: uppercase;
+  }
+
+  .session-item {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 9px;
+    background: #121b29;
+    color: var(--text-primary);
+    text-align: left;
+    cursor: pointer;
+    font-size: 12px;
+  }
+
+  .session-item:hover {
+    border-color: var(--accent-info);
+  }
+
+  .chat-pane {
+    display: grid;
+    grid-template-rows: auto auto 1fr auto auto;
+    min-height: 0;
+  }
+
+  .chat-topbar {
+    padding: 10px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .chat-top-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .history-pill {
+    margin: 10px 10px 0;
+    border: 1px solid var(--warning);
+    background: rgba(210, 153, 34, 0.18);
+    color: #f0c674;
+    border-radius: 999px;
+    padding: 4px 10px;
+    width: fit-content;
+    font-size: 12px;
+    display: none;
+  }
+
+  #messages-area {
+    min-height: 0;
+    overflow-y: auto;
+    padding: 12px;
+    display: grid;
+    gap: 10px;
+  }
+
+  .msg-row {
+    display: flex;
+    width: 100%;
+  }
+
+  .msg-row.user {
+    justify-content: flex-end;
+  }
+
+  .msg-row.assistant,
+  .msg-row.thinking {
+    justify-content: flex-start;
+  }
+
+  .bubble {
+    padding: 10px 16px;
+    border-radius: 16px;
+    position: relative;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .bubble.user {
+    max-width: 70%;
+    background: linear-gradient(135deg, #1a6ed8 0%, #7c3aed 100%);
+    color: #fff;
+    border-radius: 18px 18px 4px 18px;
+  }
+
+  .bubble.assistant {
+    max-width: 80%;
+    background: var(--glass-bg, rgba(255, 255, 255, 0.05));
+    border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.1));
+    border-radius: 18px 18px 18px 4px;
+    color: var(--text-primary);
+  }
+
+  .bubble-time {
+    display: none;
+    position: absolute;
+    right: 8px;
+    bottom: -16px;
+    color: var(--text-muted);
+    font-size: 10px;
+  }
+
+  .bubble:hover .bubble-time {
+    display: inline;
+  }
+
+  .thinking-bubble {
+    display: flex;
+    gap: 4px;
+    padding: 12px 16px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 18px 18px 18px 4px;
+    width: fit-content;
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    background: #58a6ff;
+    border-radius: 50%;
+    animation: bounce 1.2s infinite;
+  }
+
+  .dot:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+
+  .dot:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+
+  @keyframes bounce {
+    0%, 60%, 100% {
+      transform: translateY(0);
+    }
+    30% {
+      transform: translateY(-8px);
+    }
+  }
+
+  .bubble.assistant pre {
+    background: #1e1e1e;
+    padding: 10px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-family: "JetBrains Mono", monospace;
+    position: relative;
+  }
+
+  .copy-code-btn {
+    float: right;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: #273449;
+    color: var(--text-primary);
+    font-size: 11px;
+    padding: 3px 6px;
+    cursor: pointer;
+    margin-bottom: 6px;
+  }
+
+  .agent-bottom {
+    border-top: 1px solid var(--border);
+    padding: 10px;
+    display: grid;
+    gap: 8px;
+  }
+
+  .agent-input-wrap {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    align-items: end;
+  }
+
+  .agent-send-wrap {
+    display: grid;
+    gap: 8px;
+  }
+
+  .send-spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+    display: inline-block;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .agent-drop {
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 8px;
+    color: var(--text-muted);
+    text-align: center;
+    font-size: 12px;
+  }
+
+  .agent-drop.dragging {
+    border-color: var(--accent-info);
+    color: var(--text-primary);
+  }
+
+  .attach-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  @media (max-width: 1100px) {
+    .chat-shell {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="agent-layout">
-  <aside class="agent-history">
-    <h3>History</h3>
-    <div id="historyGroups"></div>
-    <div id="replayBanner" class="warn-banner" style="display:none;">🔁 REPLAY MODE (read-only)</div>
-    <button id="continueSessionBtn" class="btn-primary" style="display:none;">▶ Continue Session</button>
+<div class="chat-shell">
+  <aside class="session-sidebar">
+    <div class="session-head">
+      <h3>Sessions</h3>
+      <button id="newChatBtn" class="btn-primary" type="button">+ New Chat</button>
+    </div>
+    <div class="small-muted">History</div>
+    <div id="historySidebar" class="session-groups"></div>
   </aside>
 
-  <section class="agent-main">
-    <div class="agent-topbar">
-      <div>
-        <label>Model</label>
+  <section class="chat-pane">
+    <div class="chat-topbar">
+      <div class="chat-top-actions">
+        <label for="agentModel">Model</label>
         <select id="agentModel" class="input small">
           {% for model in models %}
           <option value="{{ model }}" {% if model == default_model %}selected{% endif %}>{{ model }} {{ model_metadata.get(model, {}).get('badge', '') }}</option>
           {% endfor %}
         </select>
       </div>
-      <span class="small-muted">Session: <span id="agentSessionLabel">-</span></span>
+      <div class="chat-top-actions">
+        <span class="small-muted">Session: <span id="agentSessionLabel">-</span></span>
+        <button id="clearChatBtn" class="btn-secondary" type="button">Clear</button>
+      </div>
     </div>
 
-    <div id="agentSteps" class="step-cards"></div>
-    <div id="agentMessages" class="chat-messages"></div>
+    <div id="historyModePill" class="history-pill">📖 Viewing History (read-only)</div>
+    <div id="messages-area"></div>
+
+    <div id="agentAttachPills" class="attach-pills" style="padding:0 10px;"></div>
 
     <div class="agent-bottom">
-      <div id="agentAttachPills" class="attach-pills"></div>
-      <div id="agentDrop" class="drop-zone">Drop files (.c .h .dts .dtsi .patch .log .txt .diff) here</div>
-      <textarea id="agentInput" class="input" rows="4" placeholder="Ask anything: review my latest commit, explain this function, convert this driver..."></textarea>
-      <div class="agent-actions">
-        <input id="agentFileInput" type="file" multiple>
-        <button id="agentSendBtn" class="btn-primary">Send</button>
+      <div id="agentDrop" class="agent-drop">Drop files (.c .h .dts .dtsi .patch .log .txt .diff) here</div>
+      <div class="agent-input-wrap">
+        <textarea id="agentInput" class="input" rows="1" placeholder="Ask anything about your kernel patch workflow..."></textarea>
+        <div class="agent-send-wrap">
+          <input id="agentFileInput" type="file" multiple>
+          <button id="agentSendBtn" class="btn-primary" type="button">Send</button>
+          <button id="continueSessionBtn" class="btn-secondary" type="button" style="display:none;">▶ Continue Session</button>
+        </div>
       </div>
-      <div id="agentTerminal" class="terminal-pane"></div>
     </div>
   </section>
 </div>
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/terminal.js') }}"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script>
 (function () {
-  const socket = io();
   const sessionKey = 'akdw_agent_session';
   const modelKey = 'akdw_agent_model';
+
   let sessionId = null;
-  let selectedHistorySessionId = null;
   let activeModel = localStorage.getItem(modelKey) || '{{ default_model }}';
   let replayMode = false;
+  let waiting = false;
   let attached = [];
+  let selectedHistorySessionId = null;
+
+  function nowStamp() {
+    return new Date().toLocaleTimeString();
+  }
 
   function createSessionId() {
     return 'sess-agent-' + Math.random().toString(36).slice(2, 10);
   }
 
-  function clearConversationView() {
-    document.getElementById('agentMessages').innerHTML = '';
-    document.getElementById('agentSteps').innerHTML = '';
+  function scrollToBottom() {
+    const el = document.getElementById('messages-area');
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   }
 
   function createNewSession() {
     sessionId = createSessionId();
     selectedHistorySessionId = null;
+    replayMode = false;
+    waiting = false;
     attached = [];
-    renderAttachPills();
-    clearConversationView();
-    setReplayMode(false);
     localStorage.setItem(sessionKey, sessionId);
     document.getElementById('agentSessionLabel').textContent = sessionId;
-    socket.emit('join_agent_session', {session_id: sessionId});
+    document.getElementById('messages-area').innerHTML = '';
+    document.getElementById('historyModePill').style.display = 'none';
+    document.getElementById('continueSessionBtn').style.display = 'none';
+    document.getElementById('agentInput').disabled = false;
+    document.getElementById('agentSendBtn').disabled = false;
+    document.getElementById('agentFileInput').disabled = false;
+    renderAttachPills();
+    document.getElementById('agentInput').focus();
   }
 
-  document.getElementById('agentSessionLabel').textContent = '-';
-  document.getElementById('agentModel').value = activeModel;
-  window.AKDWTerminal.init({
-    containerId: 'agentTerminal',
-    socket: socket,
-    sessionId: '',
-    getSessionId: function () { return sessionId; },
-  });
+  function setSendWaiting(enabled) {
+    waiting = enabled;
+    const btn = document.getElementById('agentSendBtn');
+    btn.disabled = enabled || replayMode;
+    btn.innerHTML = enabled ? '<span class="send-spinner"></span>' : 'Send';
+  }
 
   function setReplayMode(enabled) {
     replayMode = enabled;
-    document.getElementById('agentInput').disabled = enabled;
-    document.getElementById('agentSendBtn').disabled = enabled;
-    document.getElementById('agentFileInput').disabled = enabled;
-    document.getElementById('replayBanner').style.display = enabled ? 'block' : 'none';
+    document.getElementById('historyModePill').style.display = enabled ? 'inline-block' : 'none';
     document.getElementById('continueSessionBtn').style.display = enabled ? 'inline-block' : 'none';
+    document.getElementById('agentInput').disabled = enabled;
+    document.getElementById('agentSendBtn').disabled = enabled || waiting;
+    document.getElementById('agentFileInput').disabled = enabled;
   }
 
-  function addMsg(role, text) {
-    const box = document.getElementById('agentMessages');
+  function appendBubble(role, text, asMarkdown) {
     const row = document.createElement('div');
-    row.className = role === 'user' ? 'chat-row user' : 'chat-row assistant';
-    row.textContent = text;
-    box.appendChild(row);
-    box.scrollTop = box.scrollHeight;
-  }
+    row.className = 'msg-row ' + (role === 'user' ? 'user' : 'assistant');
 
-  function stepTitle(stepType) {
-    const labels = {
-      thinking: '🟣 THINKING',
-      tool_call: '🔵 TOOL CALL',
-      tool_result: '🟢 TOOL RESULT',
-      response: '⬜ RESPONSE',
-    };
-    return labels[stepType] || '⬜ RESPONSE';
-  }
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble ' + (role === 'user' ? 'user' : 'assistant');
 
-  function addStep(step) {
-    const box = document.getElementById('agentSteps');
-    const card = document.createElement('details');
-    card.className = 'step-card ' + (step.type || 'response');
-    card.open = step.type !== 'thinking';
-
-    const sum = document.createElement('summary');
-    sum.textContent = stepTitle(step.type || 'response') + '  [' + (step.timestamp || '') + ']';
-
-    const body = document.createElement('div');
-    body.className = 'step-body';
-
-    if (step.type === 'tool_call') {
-      const pre = document.createElement('pre');
-      const args = step.tool_args && Object.keys(step.tool_args).length ? JSON.stringify(step.tool_args, null, 2) : '{}';
-      pre.textContent = 'Tool: ' + (step.tool_name || 'unknown') + '\nArgs: ' + args;
-      body.appendChild(pre);
-    } else if (step.type === 'tool_result') {
-      const text = step.content || '';
-      const lines = text.split('\n');
-      const pre = document.createElement('pre');
-      pre.textContent = lines.slice(0, 3).join('\n');
-      body.appendChild(pre);
-      if (lines.length > 3) {
-        const btn = document.createElement('button');
-        btn.className = 'btn-secondary';
-        btn.textContent = 'Show more';
-        btn.onclick = function () {
-          const expanded = btn.dataset.expanded === '1';
-          pre.textContent = expanded ? lines.slice(0, 3).join('\n') : text;
-          btn.textContent = expanded ? 'Show more' : 'Show less';
-          btn.dataset.expanded = expanded ? '0' : '1';
-        };
-        body.appendChild(btn);
-      }
-    } else if (step.type === 'response' && window.marked) {
-      body.innerHTML = window.marked.parse(step.content || '');
+    if (role === 'assistant' && asMarkdown && window.marked) {
+      bubble.innerHTML = window.marked.parse(text || '');
+      decorateCodeBlocks(bubble);
     } else {
-      const pre = document.createElement('pre');
-      pre.style.fontStyle = step.type === 'thinking' ? 'italic' : 'normal';
-      pre.textContent = step.content || '';
-      body.appendChild(pre);
+      bubble.textContent = text || '';
     }
 
-    card.appendChild(sum);
-    card.appendChild(body);
-    box.appendChild(card);
-    box.scrollTop = box.scrollHeight;
+    const stamp = document.createElement('span');
+    stamp.className = 'bubble-time';
+    stamp.textContent = nowStamp();
+    bubble.appendChild(stamp);
+
+    row.appendChild(bubble);
+    document.getElementById('messages-area').appendChild(row);
+    scrollToBottom();
+  }
+
+  function decorateCodeBlocks(container) {
+    container.querySelectorAll('pre > code').forEach(function (block) {
+      const pre = block.parentElement;
+      if (pre.querySelector('.copy-code-btn')) return;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'copy-code-btn';
+      btn.textContent = 'Copy';
+      btn.addEventListener('click', function () {
+        navigator.clipboard.writeText(block.textContent || '');
+        btn.textContent = 'Copied';
+        setTimeout(function () { btn.textContent = 'Copy'; }, 1200);
+      });
+      pre.insertBefore(btn, pre.firstChild);
+    });
+  }
+
+  function showThinkingBubble() {
+    removeThinkingBubble();
+    const row = document.createElement('div');
+    row.className = 'msg-row thinking';
+    row.id = 'thinkingRow';
+    row.innerHTML = '<div class="thinking-bubble"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>';
+    document.getElementById('messages-area').appendChild(row);
+    scrollToBottom();
+  }
+
+  function removeThinkingBubble() {
+    const row = document.getElementById('thinkingRow');
+    if (row) row.remove();
   }
 
   function renderAttachPills() {
@@ -169,8 +447,12 @@
       pill.className = 'file-pill';
       pill.textContent = '📎 ' + f.filename;
       const close = document.createElement('button');
+      close.type = 'button';
       close.textContent = '×';
-      close.onclick = function () { attached.splice(idx, 1); renderAttachPills(); };
+      close.onclick = function () {
+        attached.splice(idx, 1);
+        renderAttachPills();
+      };
       pill.appendChild(close);
       box.appendChild(pill);
     });
@@ -188,88 +470,134 @@
   }
 
   async function sendMessage() {
-    if (replayMode) return;
+    if (replayMode || waiting) return;
     const input = document.getElementById('agentInput');
     const msg = input.value.trim();
     if (!msg && attached.length === 0) return;
 
-    addMsg('user', msg || '(attachments)');
+    appendBubble('user', msg || '(attachments)', false);
     input.value = '';
+    autoResizeInput();
 
-    await fetch('/agent/chat', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        session_id: sessionId,
-        page: 'agent',
-        model: activeModel,
-        message: msg,
-        attachments: attached,
-      }),
-    });
+    showThinkingBubble();
+    setSendWaiting(true);
 
-    attached = [];
-    renderAttachPills();
+    try {
+      const res = await fetch('/api/agent/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          page: 'agent',
+          model: activeModel,
+          message: msg,
+          attachments: attached,
+        }),
+      });
+      const data = await res.json();
+      removeThinkingBubble();
+      appendBubble('assistant', data.response || data.content || data.message || 'No response', true);
+      attached = [];
+      renderAttachPills();
+      loadHistorySidebar();
+    } catch (err) {
+      removeThinkingBubble();
+      appendBubble('assistant', 'Request failed: ' + err, false);
+    } finally {
+      setSendWaiting(false);
+      input.focus();
+      scrollToBottom();
+    }
   }
 
-  async function loadHistory() {
+  function autoResizeInput() {
+    const ta = document.getElementById('agentInput');
+    ta.style.height = 'auto';
+    const lineHeight = 22;
+    const maxHeight = lineHeight * 5;
+    ta.style.height = Math.min(ta.scrollHeight, maxHeight) + 'px';
+    ta.style.overflowY = ta.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }
+
+  async function loadHistorySidebar() {
     const res = await fetch('/agent/sessions');
     const data = await res.json();
-    const groups = data.grouped || {};
-    const root = document.getElementById('historyGroups');
+    const grouped = data.grouped || {};
+    const root = document.getElementById('historySidebar');
     root.innerHTML = '';
 
     ['patchwise', 'agent', 'triage', 'converter'].forEach(function (page) {
-      const items = groups[page] || [];
-      const section = document.createElement('div');
-      section.className = 'history-section';
-      section.innerHTML = '<h4>' + page + '</h4>';
-      items.forEach(function (item) {
+      const group = document.createElement('div');
+      group.className = 'session-group';
+      const title = document.createElement('h4');
+      title.textContent = page;
+      group.appendChild(title);
+
+      const rows = grouped[page] || [];
+      rows.forEach(function (item) {
         const btn = document.createElement('button');
-        btn.className = 'history-item';
+        btn.type = 'button';
+        btn.className = 'session-item';
         btn.textContent = item.name;
-        btn.onclick = function () { openReplay(item.id); };
-        section.appendChild(btn);
+        btn.addEventListener('click', function () {
+          openHistorySession(item.id);
+        });
+        group.appendChild(btn);
       });
-      root.appendChild(section);
+
+      root.appendChild(group);
     });
   }
 
-  async function openReplay(id) {
-    setReplayMode(true);
+  async function openHistorySession(id) {
     selectedHistorySessionId = id;
     sessionId = id;
-    localStorage.setItem(sessionKey, sessionId);
-    document.getElementById('agentSessionLabel').textContent = sessionId;
-    clearConversationView();
-    socket.emit('join_agent_session', {session_id: sessionId});
+    document.getElementById('agentSessionLabel').textContent = id;
+    document.getElementById('messages-area').innerHTML = '';
+    setReplayMode(true);
 
     const res = await fetch('/agent/sessions/' + encodeURIComponent(id) + '/messages');
     const data = await res.json();
     (data.messages || []).forEach(function (msg) {
-      if (msg.step_type && msg.step_type !== 'response') {
-        addStep({
-          type: msg.step_type,
-          content: msg.content,
-          timestamp: (msg.created_at || '').slice(11, 19),
-          tool_name: msg.tool_name,
-          tool_args: msg.tool_args || {},
-        });
-      } else {
-        addMsg(msg.role, msg.content);
+      if (msg.role === 'user') {
+        appendBubble('user', msg.content || '', false);
+      } else if (msg.step_type === 'response' || !msg.step_type) {
+        appendBubble('assistant', msg.content || '', true);
       }
     });
+    scrollToBottom();
   }
 
-  document.getElementById('continueSessionBtn').addEventListener('click', async function () {
+  async function continueSession() {
     if (!selectedHistorySessionId) return;
+    await fetch('/agent/sessions/' + encodeURIComponent(selectedHistorySessionId) + '/continue', {
+      method: 'POST',
+    });
     sessionId = selectedHistorySessionId;
-    await fetch('/agent/sessions/' + encodeURIComponent(sessionId) + '/continue', { method: 'POST' });
-    socket.emit('join_agent_session', {session_id: sessionId});
+    localStorage.setItem(sessionKey, sessionId);
     setReplayMode(false);
+    document.getElementById('agentInput').focus();
+  }
+
+  document.getElementById('newChatBtn').addEventListener('click', function () {
+    createNewSession();
+  });
+
+  document.getElementById('clearChatBtn').addEventListener('click', function () {
+    document.getElementById('messages-area').innerHTML = '';
+  });
+
+  document.getElementById('continueSessionBtn').addEventListener('click', continueSession);
+
+  document.getElementById('agentModel').value = activeModel;
+  document.getElementById('agentModel').addEventListener('change', function (e) {
+    activeModel = e.target.value;
+    localStorage.setItem(modelKey, activeModel);
   });
 
   document.getElementById('agentSendBtn').addEventListener('click', sendMessage);
+
+  document.getElementById('agentInput').addEventListener('input', autoResizeInput);
   document.getElementById('agentInput').addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -277,13 +605,8 @@
     }
   });
 
-  document.getElementById('agentModel').addEventListener('change', function (e) {
-    activeModel = e.target.value;
-    localStorage.setItem(modelKey, activeModel);
-  });
-
   document.getElementById('agentFileInput').addEventListener('change', function () {
-    readFiles(this.files);
+    readFiles(this.files || []);
     this.value = '';
   });
 
@@ -293,29 +616,23 @@
       this.classList.add('dragging');
     });
   });
+
   ['dragleave', 'drop'].forEach(function (evt) {
     document.getElementById('agentDrop').addEventListener(evt, function (e) {
       e.preventDefault();
       this.classList.remove('dragging');
     });
   });
+
   document.getElementById('agentDrop').addEventListener('drop', function (e) {
-    readFiles(e.dataTransfer.files || []);
+    readFiles((e.dataTransfer && e.dataTransfer.files) || []);
   });
 
-  socket.on('agent_step', function (msg) {
-    if (!msg || msg.session_id !== sessionId) return;
-    addStep(msg);
-    if (msg.type === 'response') addMsg('assistant', msg.content || '');
+  document.addEventListener('DOMContentLoaded', function() {
+    createNewSession();
+    loadHistorySidebar();
+    autoResizeInput();
   });
-
-  socket.on('session_joined', function (msg) {
-    if (!msg || msg.session_id !== sessionId) return;
-    document.getElementById('agentSessionLabel').textContent = sessionId;
-  });
-
-  createNewSession();
-  loadHistory();
 })();
 </script>
 {% endblock %}
