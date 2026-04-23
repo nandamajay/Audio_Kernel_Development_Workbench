@@ -27,3 +27,8 @@ SECTION 6	6c patchwise review end-to-end	PASS	findings key present count 13
 SECTION 6	6d settings API save/load round-trip	PASS	settings save returned ok true
 SECTION 6	6e evidence round-trip	PASS	attach/list/delete succeeded
 SECTION 6	6f container stability	PASS	container Up healthy; no critical errors in recent logs
+SECTION 7	7a report generation	PASS	/app/workspace/reports/overnight_report.html generated
+SECTION 7	7b report copied to host	PASS	/local/mnt/workspace/AKDW/overnight_report.html
+SECTION 7	7c email delivery	FIXED	container SMTP failed; host sendmail succeeded
+SECTION 7	7d final git commit	PASS	e338f9f
+SECTION 8	final terminal summary	PASS	status block printed
