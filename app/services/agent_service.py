@@ -188,6 +188,8 @@ class AgentService:
             except Exception as exc:
                 return f"QGenie initialization failed: {exc}"
 
+        response = None
+        primary_error = None
         try:
             response = client.chat(messages=messages, model=model)
         except TypeError:
@@ -196,7 +198,25 @@ class AgentService:
             except Exception as exc:
                 return f"QGenie call failed, fallback response generated. Details: {exc}"
         except Exception as exc:
-            return f"QGenie call failed, fallback response generated. Details: {exc}"
+            primary_error = exc
+
+        # Some enterprise gateways reject model aliases even with a valid token.
+        # Retry once without explicit model so server-side default can be used.
+        if response is None and primary_error is not None:
+            primary_msg = str(primary_error)
+            if "Invalid Model name" in primary_msg or "NOT_FOUND" in primary_msg:
+                try:
+                    response = client.chat(messages=messages)
+                except Exception as retry_exc:
+                    return (
+                        "QGenie call failed, fallback response generated. "
+                        f"Details: {retry_exc}"
+                    )
+            else:
+                return (
+                    "QGenie call failed, fallback response generated. "
+                    f"Details: {primary_error}"
+                )
 
         if isinstance(response, str):
             return response
