@@ -4,11 +4,12 @@ services:
   akdw:
     build: .
     ports:
-      - "5001:5001"
+      - "${AKDW_PORT:-5001}:${FLASK_PORT:-5000}"
     volumes:
-      - ./uploads:/app/uploads
-      - ./workspace:/app/workspace
-      - ./akdw.db:/app/akdw.db
+      - /local/mnt/workspace/AUDIO_KERNEL_DEVELOPMENT_WORKBENCH(AKDW):/app/workspace:rw
+      - /local/mnt/workspace/AUDIO_KERNEL_DEVELOPMENT_WORKBENCH(AKDW)/kernel:/app/kernel:rw
+      - /local/mnt/workspace/AUDIO_KERNEL_DEVELOPMENT_WORKBENCH(AKDW)/sessions:/app/sessions:rw
+      - /local/mnt/workspace/AUDIO_KERNEL_DEVELOPMENT_WORKBENCH(AKDW)/patches:/app/patches:rw
       - ~/.gitconfig:/root/.gitconfig:ro
       - ~/.ssh:/root/.ssh:ro
     env_file:
@@ -17,7 +18,7 @@ services:
       - FLASK_ENV=development
       - PYTHONUNBUFFERED=1
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:${FLASK_PORT:-5000}/health || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 5

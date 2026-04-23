@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Setup{% endblock %}
+{% block content %}
+<div class="setup-wrap">
+  <div class="setup-card">
+    <h2>First-Time Setup</h2>
+    <p>Configure your QGenie credentials to start AKDW.</p>
+
+    <label>Display Name</label>
+    <input id="displayName" class="input" value="{{ default_username }}">
+
+    <label>Provider URL</label>
+    <input id="providerUrl" class="input" value="{{ provider_url }}">
+
+    <label>QGenie API Key</label>
+    <div class="password-row">
+      <input id="apiKey" class="input" type="password" placeholder="Enter API key">
+      <button id="toggleKey" class="btn-secondary" type="button">Show</button>
+    </div>
+
+    <div class="setup-actions">
+      <button id="validateBtn" class="btn-secondary" type="button">Validate</button>
+      <button id="saveBtn" class="btn-primary" type="button">Save & Continue</button>
+    </div>
+    <p id="setupStatus" class="setup-status"></p>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const apiKey = document.getElementById('apiKey');
+  const toggle = document.getElementById('toggleKey');
+  const status = document.getElementById('setupStatus');
+
+  toggle.addEventListener('click', function () {
+    const hidden = apiKey.type === 'password';
+    apiKey.type = hidden ? 'text' : 'password';
+    toggle.textContent = hidden ? 'Hide' : 'Show';
+  });
+
+  async function validateOnly() {
+    status.textContent = 'Validating...';
+    const resp = await fetch('/api/setup/validate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        api_key: apiKey.value,
+        provider_url: document.getElementById('providerUrl').value,
+      })
+    });
+    const data = await resp.json();
+    status.textContent = (data.ok ? '✅ ' : '❌ ') + data.message;
+    return data.ok;
+  }
+
+  document.getElementById('validateBtn').addEventListener('click', validateOnly);
+
+  document.getElementById('saveBtn').addEventListener('click', async function () {
+    const ok = await validateOnly();
+    if (!ok) return;
+
+    const resp = await fetch('/api/setup/save', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        api_key: apiKey.value,
+        provider_url: document.getElementById('providerUrl').value,
+        user_display_name: document.getElementById('displayName').value,
+      })
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      window.location.href = data.redirect;
+      return;
+    }
+    status.textContent = '❌ ' + (data.message || 'Save failed');
+  });
+})();
+</script>
+{% endblock %}

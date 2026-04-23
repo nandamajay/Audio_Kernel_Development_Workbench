@@ -1,3 +1,40 @@
 {% extends "base.html" %}
 {% block title %}Triage{% endblock %}
-{% block content %}<div class="placeholder-panel">Triage module will be implemented in Phase 5.</div>{% endblock %}
+{% block content %}
+<div class="dashboard-wrap">
+  <div class="editor-toolbar-row">
+    <div class="path-switcher">
+      <input id="triagePathInput" class="input" value="/app/kernel">
+      <button id="triageBrowseBtn" class="btn-secondary">📂 Browse</button>
+      <button id="triageApplyBtn" class="btn-primary">Apply</button>
+    </div>
+  </div>
+  <div id="triagePathListing" class="panel small-muted">Triage module will be implemented in Phase 5.</div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const input = document.getElementById('triagePathInput');
+  const listing = document.getElementById('triagePathListing');
+  const key = 'akdw_triage_path';
+  input.value = localStorage.getItem(key) || '/app/kernel';
+
+  async function refresh() {
+    const path = input.value.trim();
+    localStorage.setItem(key, path);
+    const resp = await fetch('/api/fs/browse?path=' + encodeURIComponent(path));
+    const data = await resp.json();
+    if (!data.ok) {
+      listing.textContent = data.error || 'Path not allowed';
+      return;
+    }
+    listing.textContent = 'Active path: ' + data.path + ' (' + (data.entries || []).length + ' entries)';
+  }
+
+  document.getElementById('triageBrowseBtn').addEventListener('click', refresh);
+  document.getElementById('triageApplyBtn').addEventListener('click', refresh);
+  refresh();
+})();
+</script>
+{% endblock %}

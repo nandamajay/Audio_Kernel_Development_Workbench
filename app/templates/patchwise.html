@@ -1,3 +1,56 @@
 {% extends "base.html" %}
 {% block title %}Patch Workshop{% endblock %}
-{% block content %}<div class="placeholder-panel">Patch Workshop module will be implemented in Phase 3.</div>{% endblock %}
+{% block content %}
+<div class="dashboard-wrap">
+  <div class="editor-toolbar-row">
+    <div class="path-switcher">
+      <input id="patchPathInput" class="input" value="/app/kernel">
+      <button id="patchBrowseBtn" class="btn-secondary">📂 Browse</button>
+      <button id="patchApplyBtn" class="btn-primary">Apply</button>
+    </div>
+    <div class="editor-meta">
+      <label>Model</label>
+      <select id="patchModel" class="input small">
+        {% for model in models %}
+        <option value="{{ model }}" {% if model == default_model %}selected{% endif %}>{{ model }} {{ model_metadata.get(model, {}).get('badge', '') }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+  <div id="patchPathListing" class="panel small-muted">PatchWise module will be implemented in Phase 3.</div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const input = document.getElementById('patchPathInput');
+  const listing = document.getElementById('patchPathListing');
+  const key = 'akdw_patchwise_path';
+  const modelKey = 'akdw_patchwise_model';
+  const model = document.getElementById('patchModel');
+
+  input.value = localStorage.getItem(key) || '/app/kernel';
+  model.value = localStorage.getItem(modelKey) || model.value;
+
+  async function refresh() {
+    const path = input.value.trim();
+    localStorage.setItem(key, path);
+    const resp = await fetch('/api/fs/browse?path=' + encodeURIComponent(path));
+    const data = await resp.json();
+    if (!data.ok) {
+      listing.textContent = data.error || 'Path not allowed';
+      return;
+    }
+    listing.textContent = 'Active path: ' + data.path + ' (' + (data.entries || []).length + ' entries)';
+  }
+
+  model.addEventListener('change', function () {
+    localStorage.setItem(modelKey, model.value);
+  });
+
+  document.getElementById('patchBrowseBtn').addEventListener('click', refresh);
+  document.getElementById('patchApplyBtn').addEventListener('click', refresh);
+  refresh();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<div class="setup-wrap">
+  <div class="setup-card">
+    <h2>Settings</h2>
+
+    <label>Display Name</label>
+    <input id="displayName" class="input" value="{{ values.get('USER_DISPLAY_NAME', '') }}">
+
+    <label>QGenie API Key</label>
+    <input id="apiKey" class="input" type="password" placeholder="Leave blank to keep existing">
+
+    <label>Provider URL</label>
+    <input id="providerUrl" class="input" value="{{ values.get('QGENIE_PROVIDER_URL', '') }}">
+
+    <label>Default Model</label>
+    <select id="defaultModel" class="input">
+      {% for model in models %}
+        <option value="{{ model }}" {% if selected_model == model %}selected{% endif %}>{{ model }} {{ model_metadata.get(model, {}).get('badge', '') }}</option>
+      {% endfor %}
+      <option value="auto" {% if selected_model == 'auto' %}selected{% endif %}>auto</option>
+    </select>
+
+    <label>Kernel Source Path</label>
+    <input id="kernelSrcPath" class="input" value="{{ values.get('KERNEL_SRC_PATH', '/app/kernel') }}">
+
+    <div class="setup-actions">
+      <a class="btn-secondary" href="{{ url_for('dashboard.setup_page') }}">Open Setup Wizard</a>
+      <button id="saveBtn" class="btn-primary" type="button">Save Settings</button>
+    </div>
+    <p id="setupStatus" class="setup-status"></p>
+  </div>
+</div>
+<div id="saveToast" class="save-toast" style="display:none;">✅ Settings saved</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  function showToast(message) {
+    const toast = document.getElementById('saveToast');
+    toast.textContent = message;
+    toast.style.display = 'block';
+    setTimeout(function () {
+      toast.style.display = 'none';
+    }, 2400);
+  }
+
+  document.getElementById('saveBtn').addEventListener('click', async function () {
+    const payload = {
+      user_display_name: document.getElementById('displayName').value,
+      api_key: document.getElementById('apiKey').value,
+      provider_url: document.getElementById('providerUrl').value,
+      default_model: document.getElementById('defaultModel').value,
+      kernel_src_path: document.getElementById('kernelSrcPath').value,
+    };
+    const resp = await fetch('/api/settings/save', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    document.getElementById('setupStatus').textContent = (data.ok ? '✅ ' : '❌ ') + data.message;
+    if (data.ok) showToast('✅ Settings saved');
+  });
+})();
+</script>
+{% endblock %}

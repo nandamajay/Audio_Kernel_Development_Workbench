@@ -1,3 +1,292 @@
 {% extends "base.html" %}
 {% block title %}QGenie Agent{% endblock %}
-{% block content %}<div class="placeholder-panel">QGenie Agent module will be implemented in Phase 2.</div>{% endblock %}
+
+{% block content %}
+<div class="agent-layout">
+  <aside class="agent-history">
+    <h3>History</h3>
+    <div id="historyGroups"></div>
+    <div id="replayBanner" class="warn-banner" style="display:none;">🔁 REPLAY MODE (read-only)</div>
+    <button id="continueSessionBtn" class="btn-primary" style="display:none;">▶ Continue Session</button>
+  </aside>
+
+  <section class="agent-main">
+    <div class="agent-topbar">
+      <div>
+        <label>Model</label>
+        <select id="agentModel" class="input small">
+          {% for model in models %}
+          <option value="{{ model }}" {% if model == default_model %}selected{% endif %}>{{ model }} {{ model_metadata.get(model, {}).get('badge', '') }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <span class="small-muted">Session: <span id="agentSessionLabel">-</span></span>
+    </div>
+
+    <div id="agentSteps" class="step-cards"></div>
+    <div id="agentMessages" class="chat-messages"></div>
+
+    <div class="agent-bottom">
+      <div id="agentAttachPills" class="attach-pills"></div>
+      <div id="agentDrop" class="drop-zone">Drop files (.c .h .dts .dtsi .patch .log .txt .diff) here</div>
+      <textarea id="agentInput" class="input" rows="4" placeholder="Ask anything: review my latest commit, explain this function, convert this driver..."></textarea>
+      <div class="agent-actions">
+        <input id="agentFileInput" type="file" multiple>
+        <button id="agentSendBtn" class="btn-primary">Send</button>
+      </div>
+      <div id="agentTerminal" class="terminal-pane"></div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/terminal.js') }}"></script>
+<script>
+(function () {
+  const socket = io();
+  const sessionKey = 'akdw_agent_session';
+  const modelKey = 'akdw_agent_model';
+  let sessionId = localStorage.getItem(sessionKey) || ('sess-agent-' + Math.random().toString(36).slice(2, 10));
+  let activeModel = localStorage.getItem(modelKey) || '{{ default_model }}';
+  let replayMode = false;
+  let attached = [];
+
+  document.getElementById('agentSessionLabel').textContent = sessionId;
+  document.getElementById('agentModel').value = activeModel;
+  localStorage.setItem(sessionKey, sessionId);
+
+  socket.emit('join_agent_session', {session_id: sessionId});
+  window.AKDWTerminal.init({ containerId: 'agentTerminal', socket: socket, sessionId: sessionId });
+
+  function setReplayMode(enabled) {
+    replayMode = enabled;
+    document.getElementById('agentInput').disabled = enabled;
+    document.getElementById('agentSendBtn').disabled = enabled;
+    document.getElementById('agentFileInput').disabled = enabled;
+    document.getElementById('replayBanner').style.display = enabled ? 'block' : 'none';
+    document.getElementById('continueSessionBtn').style.display = enabled ? 'inline-block' : 'none';
+  }
+
+  function addMsg(role, text) {
+    const box = document.getElementById('agentMessages');
+    const row = document.createElement('div');
+    row.className = role === 'user' ? 'chat-row user' : 'chat-row assistant';
+    row.textContent = text;
+    box.appendChild(row);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function stepTitle(stepType) {
+    const labels = {
+      thinking: '🟣 THINKING',
+      tool_call: '🔵 TOOL CALL',
+      tool_result: '🟢 TOOL RESULT',
+      response: '⬜ RESPONSE',
+    };
+    return labels[stepType] || '⬜ RESPONSE';
+  }
+
+  function addStep(step) {
+    const box = document.getElementById('agentSteps');
+    const card = document.createElement('details');
+    card.className = 'step-card ' + (step.type || 'response');
+    card.open = step.type !== 'thinking';
+
+    const sum = document.createElement('summary');
+    sum.textContent = stepTitle(step.type || 'response') + '  [' + (step.timestamp || '') + ']';
+
+    const body = document.createElement('div');
+    body.className = 'step-body';
+
+    if (step.type === 'tool_call') {
+      const pre = document.createElement('pre');
+      const args = step.tool_args && Object.keys(step.tool_args).length ? JSON.stringify(step.tool_args, null, 2) : '{}';
+      pre.textContent = 'Tool: ' + (step.tool_name || 'unknown') + '\nArgs: ' + args;
+      body.appendChild(pre);
+    } else if (step.type === 'tool_result') {
+      const text = step.content || '';
+      const lines = text.split('\n');
+      const pre = document.createElement('pre');
+      pre.textContent = lines.slice(0, 3).join('\n');
+      body.appendChild(pre);
+      if (lines.length > 3) {
+        const btn = document.createElement('button');
+        btn.className = 'btn-secondary';
+        btn.textContent = 'Show more';
+        btn.onclick = function () {
+          const expanded = btn.dataset.expanded === '1';
+          pre.textContent = expanded ? lines.slice(0, 3).join('\n') : text;
+          btn.textContent = expanded ? 'Show more' : 'Show less';
+          btn.dataset.expanded = expanded ? '0' : '1';
+        };
+        body.appendChild(btn);
+      }
+    } else if (step.type === 'response' && window.marked) {
+      body.innerHTML = window.marked.parse(step.content || '');
+    } else {
+      const pre = document.createElement('pre');
+      pre.style.fontStyle = step.type === 'thinking' ? 'italic' : 'normal';
+      pre.textContent = step.content || '';
+      body.appendChild(pre);
+    }
+
+    card.appendChild(sum);
+    card.appendChild(body);
+    box.appendChild(card);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function renderAttachPills() {
+    const box = document.getElementById('agentAttachPills');
+    box.innerHTML = '';
+    attached.forEach(function (f, idx) {
+      const pill = document.createElement('span');
+      pill.className = 'file-pill';
+      pill.textContent = '📎 ' + f.filename;
+      const close = document.createElement('button');
+      close.textContent = '×';
+      close.onclick = function () { attached.splice(idx, 1); renderAttachPills(); };
+      pill.appendChild(close);
+      box.appendChild(pill);
+    });
+  }
+
+  function readFiles(files) {
+    Array.from(files || []).forEach(function (file) {
+      const reader = new FileReader();
+      reader.onload = function () {
+        attached.push({ filename: file.name, content: reader.result || '' });
+        renderAttachPills();
+      };
+      reader.readAsText(file);
+    });
+  }
+
+  async function sendMessage() {
+    if (replayMode) return;
+    const input = document.getElementById('agentInput');
+    const msg = input.value.trim();
+    if (!msg && attached.length === 0) return;
+
+    addMsg('user', msg || '(attachments)');
+    input.value = '';
+
+    await fetch('/agent/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        session_id: sessionId,
+        page: 'agent',
+        model: activeModel,
+        message: msg,
+        attachments: attached,
+      }),
+    });
+
+    attached = [];
+    renderAttachPills();
+  }
+
+  async function loadHistory() {
+    const res = await fetch('/agent/sessions');
+    const data = await res.json();
+    const groups = data.grouped || {};
+    const root = document.getElementById('historyGroups');
+    root.innerHTML = '';
+
+    ['patchwise', 'agent', 'triage', 'converter'].forEach(function (page) {
+      const items = groups[page] || [];
+      const section = document.createElement('div');
+      section.className = 'history-section';
+      section.innerHTML = '<h4>' + page + '</h4>';
+      items.forEach(function (item) {
+        const btn = document.createElement('button');
+        btn.className = 'history-item';
+        btn.textContent = item.name;
+        btn.onclick = function () { openReplay(item.id); };
+        section.appendChild(btn);
+      });
+      root.appendChild(section);
+    });
+  }
+
+  async function openReplay(id) {
+    setReplayMode(true);
+    sessionId = id;
+    localStorage.setItem(sessionKey, sessionId);
+    document.getElementById('agentSessionLabel').textContent = sessionId;
+    document.getElementById('agentMessages').innerHTML = '';
+    document.getElementById('agentSteps').innerHTML = '';
+
+    const res = await fetch('/agent/sessions/' + encodeURIComponent(id) + '/messages');
+    const data = await res.json();
+    (data.messages || []).forEach(function (msg) {
+      if (msg.step_type && msg.step_type !== 'response') {
+        addStep({
+          type: msg.step_type,
+          content: msg.content,
+          timestamp: (msg.created_at || '').slice(11, 19),
+          tool_name: msg.tool_name,
+          tool_args: msg.tool_args || {},
+        });
+      } else {
+        addMsg(msg.role, msg.content);
+      }
+    });
+  }
+
+  document.getElementById('continueSessionBtn').addEventListener('click', async function () {
+    await fetch('/agent/sessions/' + encodeURIComponent(sessionId) + '/continue', { method: 'POST' });
+    setReplayMode(false);
+  });
+
+  document.getElementById('agentSendBtn').addEventListener('click', sendMessage);
+  document.getElementById('agentInput').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+
+  document.getElementById('agentModel').addEventListener('change', function (e) {
+    activeModel = e.target.value;
+    localStorage.setItem(modelKey, activeModel);
+  });
+
+  document.getElementById('agentFileInput').addEventListener('change', function () {
+    readFiles(this.files);
+    this.value = '';
+  });
+
+  ['dragenter', 'dragover'].forEach(function (evt) {
+    document.getElementById('agentDrop').addEventListener(evt, function (e) {
+      e.preventDefault();
+      this.classList.add('dragging');
+    });
+  });
+  ['dragleave', 'drop'].forEach(function (evt) {
+    document.getElementById('agentDrop').addEventListener(evt, function (e) {
+      e.preventDefault();
+      this.classList.remove('dragging');
+    });
+  });
+  document.getElementById('agentDrop').addEventListener('drop', function (e) {
+    readFiles(e.dataTransfer.files || []);
+  });
+
+  socket.on('agent_step', function (msg) {
+    if (!msg || msg.session_id !== sessionId) return;
+    addStep(msg);
+    if (msg.type === 'response') addMsg('assistant', msg.content || '');
+  });
+
+  socket.on('session_joined', function (msg) {
+    if (!msg || msg.session_id !== sessionId) return;
+    document.getElementById('agentSessionLabel').textContent = sessionId;
+  });
+
+  loadHistory();
+})();
+</script>
+{% endblock %}

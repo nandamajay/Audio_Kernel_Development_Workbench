@@ -5,7 +5,10 @@
 {% block content %}
 <div class="dashboard-wrap">
   <section class="hero-panel">
-    <h2>Welcome back, Ajay</h2>
+    <div class="hero-header">
+      <h2>Welcome back, {{ user_display_name }} 👋</h2>
+      <a class="hero-settings" href="{{ url_for('dashboard.settings_page') }}">Open Settings</a>
+    </div>
     <div class="stats-grid">
       <article class="stat-card"><h3>Patches reviewed today</h3><p>{{ stats.patches_reviewed }}</p></article>
       <article class="stat-card"><h3>Drivers converted (total)</h3><p>{{ stats.drivers_converted }}</p></article>

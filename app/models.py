@@ -31,3 +31,35 @@ class ConversionJob(db.Model):
     converted_output = db.Column(db.Text, nullable=True)
     notes = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ConversationSession(db.Model):
+    id = db.Column(db.String(64), primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    messages_json = db.Column(db.Text, nullable=False, default="[]")
+
+
+class Session(db.Model):
+    __tablename__ = "sessions"
+
+    id = db.Column(db.String(64), primary_key=True)
+    name = db.Column(db.String(255), nullable=False)
+    page = db.Column(db.String(32), nullable=False)
+    phase = db.Column(db.String(32), nullable=True)
+    status = db.Column(db.String(16), nullable=False, default="active")
+    model_used = db.Column(db.String(64), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class Message(db.Model):
+    __tablename__ = "messages"
+
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.String(64), db.ForeignKey("sessions.id"), nullable=False)
+    role = db.Column(db.String(16), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    step_type = db.Column(db.String(32), nullable=True)
+    tool_name = db.Column(db.String(128), nullable=True)
+    tool_args = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)

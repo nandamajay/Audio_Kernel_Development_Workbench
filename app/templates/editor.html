@@ -1,3 +1,91 @@
 {% extends "base.html" %}
 {% block title %}Code Editor{% endblock %}
-{% block content %}<div class="placeholder-panel">Code Editor module will be implemented in Phase 2.</div>{% endblock %}
+
+{% block content %}
+<div class="editor-layout">
+  <div class="editor-toolbar-row">
+    <div class="path-switcher">
+      <input id="pathInput" class="input" value="{{ kernel_path }}">
+      <button id="browsePathBtn" class="btn-secondary">📂 Browse</button>
+      <button id="applyPathBtn" class="btn-primary">Apply</button>
+    </div>
+    <div class="editor-meta">
+      <span>Current file: <strong id="currentFile">(none)</strong></span>
+      <button id="saveFileBtn" class="btn-secondary">💾 Save</button>
+    </div>
+  </div>
+
+  {% if not kernel_exists %}
+  <div class="warn-banner">No kernel source found. Mount your kernel source at /app/kernel or change the path in Settings.</div>
+  {% endif %}
+
+  <div id="editorSplit" class="split-wrap">
+    <aside class="pane pane-left">
+      <div id="dropZone" class="drop-zone">Drop .c/.h/.dts/.dtsi or patch/log/text files here</div>
+      <div class="upload-row">
+        <input id="fileInput" type="file" multiple>
+      </div>
+      <div id="fileTree" class="file-tree"></div>
+    </aside>
+
+    <section class="pane pane-center">
+      <div id="editorPane" class="editor-pane"></div>
+      <div id="diffPanel" class="diff-panel" style="display:none;">
+        <div class="diff-toolbar">
+          <span id="diffFilename">(diff)</span>
+          <span class="small-muted">Original (left) | Proposed (right)</span>
+          <button id="acceptDiffBtn" class="btn-primary">✅ Accept Changes</button>
+          <button id="rejectDiffBtn" class="btn-secondary">❌ Reject</button>
+          <button id="saveDiffBtn" class="btn-secondary">💾 Save to File</button>
+        </div>
+        <div id="diffEditor" class="diff-editor"></div>
+      </div>
+      <div id="terminalPane" class="terminal-pane"></div>
+    </section>
+
+    <aside class="pane pane-right">
+      <div class="chat-header-row">
+        <div class="model-row">
+          <label>Model</label>
+          <select id="modelSelect" class="input small">
+            {% for model in models %}
+            <option value="{{ model }}" {% if model == default_model %}selected{% endif %}>{{ model }} {{ model_metadata.get(model, {}).get('badge', '') }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <span class="small-muted">Session: live</span>
+      </div>
+
+      <div id="stepCards" class="step-cards"></div>
+      <div id="chatMessages" class="chat-messages"></div>
+      <div id="attachPills" class="attach-pills"></div>
+      <div class="chat-input-row">
+        <textarea id="chatInput" class="input" rows="3" placeholder="Ask QGenie or use Monaco right-click: Ask QGenie"></textarea>
+        <button id="sendBtn" class="btn-primary">Ask QGenie</button>
+      </div>
+    </aside>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/terminal.js') }}"></script>
+<script src="{{ url_for('static', filename='js/diff_viewer.js') }}"></script>
+<script src="{{ url_for('static', filename='js/editor.js') }}"></script>
+<script>
+  window.addEventListener('DOMContentLoaded', function () {
+    if (window.Split) {
+      Split(['.pane-left', '.pane-center', '.pane-right'], {
+        sizes: [20, 55, 25],
+        minSize: [180, 420, 260],
+        gutterSize: 8,
+      });
+    }
+    window.AKDWEditor.init({
+      sessionId: 'sess-editor-default',
+      defaultModel: '{{ default_model }}',
+      defaultPath: '{{ kernel_path }}',
+    });
+  });
+</script>
+{% endblock %}
