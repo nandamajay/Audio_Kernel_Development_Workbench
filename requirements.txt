@@ -1,0 +1,13 @@
+flask==3.0.3
+flask-socketio==5.3.6
+flask-sqlalchemy==3.1.1
+flask-migrate==4.0.7
+python-dotenv==1.0.1
+eventlet==0.36.1
+patchwise
+qgenie-sdk
+gitpython==3.1.44
+sqlalchemy==2.0.29
+alembic==1.13.2
+pytest==8.3.5
+requests==2.32.3

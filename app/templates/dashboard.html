@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="dashboard-wrap">
+  <section class="hero-panel">
+    <h2>Welcome back, Ajay</h2>
+    <div class="stats-grid">
+      <article class="stat-card"><h3>Patches reviewed today</h3><p>{{ stats.patches_reviewed }}</p></article>
+      <article class="stat-card"><h3>Drivers converted (total)</h3><p>{{ stats.drivers_converted }}</p></article>
+      <article class="stat-card"><h3>Triage sessions</h3><p>{{ stats.triage_sessions }}</p></article>
+      <article class="stat-card"><h3>Last git activity</h3><p>{{ stats.last_git_activity }}</p></article>
+    </div>
+  </section>
+
+  <section class="cards-grid">
+    <a class="action-card" href="{{ url_for('patchwise.patchwise_home') }}">🩹 Review My Patches</a>
+    <a class="action-card" href="{{ url_for('converter.converter_home') }}">🔄 Convert Driver</a>
+    <a class="action-card" href="{{ url_for('triage.triage_home') }}">🐛 Triage Issue</a>
+    <a class="action-card" href="{{ url_for('editor.editor_home') }}">📝 Open Code Editor</a>
+    <a class="action-card" href="{{ url_for('agent.agent_home') }}">🤖 Chat with QGenie</a>
+  </section>
+
+  <section class="panel-grid">
+    <article class="panel">
+      <h3>Recent Activity</h3>
+      <ul class="activity-list">
+        {% for item in recent_activity %}
+          <li><span>{{ item.label }}</span><time>{{ item.timestamp }}</time></li>
+        {% endfor %}
+      </ul>
+    </article>
+    <article class="panel">
+      <h3>Patch Health</h3>
+      <canvas id="patchHealthChart" height="120"></canvas>
+    </article>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+<script>
+  if (window.AKDWCharts && window.AKDWCharts.renderPatchHealthChart) {
+    window.AKDWCharts.renderPatchHealthChart('patchHealthChart');
+  }
+</script>
+{% endblock %}

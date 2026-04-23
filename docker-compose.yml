@@ -1,0 +1,23 @@
+version: "3.9"
+
+services:
+  akdw:
+    build: .
+    ports:
+      - "5001:5001"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./workspace:/app/workspace
+      - ./akdw.db:/app/akdw.db
+      - ~/.gitconfig:/root/.gitconfig:ro
+      - ~/.ssh:/root/.ssh:ro
+    env_file:
+      - .env
+    environment:
+      - FLASK_ENV=development
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
