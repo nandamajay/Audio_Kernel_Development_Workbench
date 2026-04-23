@@ -2,6 +2,7 @@ version: "3.9"
 
 services:
   akdw:
+    container_name: akdw
     build: .
     ports:
       - "${AKDW_PORT:-5001}:${FLASK_PORT:-5000}"

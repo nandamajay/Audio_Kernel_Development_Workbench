@@ -4,15 +4,16 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from flask import has_app_context
+from flask import current_app, has_app_context
 
-from app.config import Config, get_default_model
+from app.config import get_default_model
 from app.services.session_service import append_message, ensure_session
 
 ANSI_RESET = "\x1b[0m"
@@ -144,6 +145,21 @@ class AgentService:
             )
         return "\n\n".join([chunk for chunk in chunks if chunk])
 
+    def _runtime_qgenie_config(self) -> Dict[str, str]:
+        if has_app_context():
+            return {
+                "api_key": (current_app.config.get("QGENIE_API_KEY") or "").strip(),
+                "provider_url": (
+                    current_app.config.get("QGENIE_PROVIDER_URL")
+                    or os.getenv("QGENIE_PROVIDER_URL", "https://qgenie-chat.qualcomm.com/v1")
+                ).strip(),
+            }
+
+        return {
+            "api_key": os.getenv("QGENIE_API_KEY", "").strip(),
+            "provider_url": os.getenv("QGENIE_PROVIDER_URL", "https://qgenie-chat.qualcomm.com/v1").strip(),
+        }
+
     def _try_qgenie_chat(self, model: str, prompt: str) -> str:
         try:
             from qgenie import ChatMessage, QGenieClient
@@ -153,18 +169,22 @@ class AgentService:
             except Exception:
                 return "QGenie SDK unavailable in runtime; returning simulated response."
 
-        if not Config.QGENIE_API_KEY:
+        runtime_cfg = self._runtime_qgenie_config()
+        api_key = runtime_cfg["api_key"]
+        provider_url = runtime_cfg["provider_url"]
+
+        if not api_key:
             return "QGENIE_API_KEY is not configured; returning simulated response."
 
         messages = [ChatMessage(role="user", content=prompt)]
         try:
             client = QGenieClient(
-                api_key=Config.QGENIE_API_KEY,
-                base_url=Config.QGENIE_PROVIDER_URL,
+                api_key=api_key,
+                base_url=provider_url,
             )
         except TypeError:
             try:
-                client = QGenieClient(api_key=Config.QGENIE_API_KEY)
+                client = QGenieClient(api_key=api_key)
             except Exception as exc:
                 return f"QGenie initialization failed: {exc}"
 

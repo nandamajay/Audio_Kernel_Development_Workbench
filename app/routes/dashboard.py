@@ -87,8 +87,8 @@ def validate_setup_key():
     payload = request.get_json() or {}
     api_key = payload.get("api_key", "")
     provider_url = payload.get("provider_url", Config.QGENIE_PROVIDER_URL)
-    ssl_verify = payload.get("ssl_verify", "true")
-    ca_bundle = payload.get("ca_bundle", "")
+    ssl_verify = payload.get("ssl_verify", current_app.config.get("QGENIE_SSL_VERIFY", "true"))
+    ca_bundle = payload.get("ca_bundle", current_app.config.get("QGENIE_CA_BUNDLE", ""))
     ok, message = validate_qgenie_key(api_key, provider_url, ssl_verify=ssl_verify, ca_bundle=ca_bundle)
     return jsonify({"ok": ok, "message": message}), (200 if ok else 400)
 
@@ -99,8 +99,9 @@ def save_setup():
     api_key = payload.get("api_key", "").strip()
     provider_url = payload.get("provider_url", Config.QGENIE_PROVIDER_URL).strip()
     user_display_name = payload.get("user_display_name", "").strip() or current_username()
-    ssl_verify = "true" if str(payload.get("ssl_verify", "true")).lower() == "true" else "false"
-    ca_bundle = payload.get("ca_bundle", "").strip()
+    ssl_verify_raw = payload.get("ssl_verify", current_app.config.get("QGENIE_SSL_VERIFY", "true"))
+    ssl_verify = "true" if str(ssl_verify_raw).lower() == "true" else "false"
+    ca_bundle = (payload.get("ca_bundle", current_app.config.get("QGENIE_CA_BUNDLE", "")) or "").strip()
 
     ok, message = validate_qgenie_key(api_key, provider_url, ssl_verify=ssl_verify, ca_bundle=ca_bundle)
     if not ok:
@@ -132,16 +133,19 @@ def settings_page():
 
 
 @dashboard_bp.post("/api/settings/save")
+@dashboard_bp.post("/api/settings")
 def save_settings():
     payload = request.get_json() or {}
+    ssl_verify_raw = payload.get("ssl_verify", current_app.config.get("QGENIE_SSL_VERIFY", "true"))
+    ca_bundle_raw = payload.get("ca_bundle", current_app.config.get("QGENIE_CA_BUNDLE", ""))
     updates = {
         "USER_DISPLAY_NAME": (payload.get("user_display_name") or "").strip(),
         "QGENIE_DEFAULT_MODEL": (payload.get("default_model") or "auto").strip(),
         "KERNEL_SRC_PATH": (payload.get("kernel_src_path") or Config.KERNEL_SRC_PATH).strip(),
         "QGENIE_SSL_VERIFY": "true"
-        if str(payload.get("ssl_verify", "true")).lower() == "true"
+        if str(ssl_verify_raw).lower() == "true"
         else "false",
-        "QGENIE_CA_BUNDLE": (payload.get("ca_bundle") or "").strip(),
+        "QGENIE_CA_BUNDLE": (ca_bundle_raw or "").strip(),
     }
 
     api_key = (payload.get("api_key") or "").strip()

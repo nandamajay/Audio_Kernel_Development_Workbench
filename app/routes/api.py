@@ -7,8 +7,10 @@ from typing import Any, Dict, List
 
 from flask import Blueprint, jsonify, request
 
+from app.config import get_default_model
 from app.services.fs_service import list_directory, safe_path
 from app.services.git_service import list_recent_commits
+from app.services.session_service import create_session_id
 
 api_bp = Blueprint("api", __name__)
 
@@ -69,3 +71,37 @@ def git_commits():
     target = safe_path(cwd) or cwd
     commits = list_recent_commits(cwd=target, n=count)
     return jsonify({"ok": True, "commits": commits})
+
+
+@api_bp.post("/api/agent/chat")
+def agent_chat_api():
+    payload = request.get_json() or {}
+    message = (payload.get("message") or "").strip()
+    if not message and not payload.get("attachments"):
+        return jsonify({"ok": False, "error": "Message or attachments required"}), 400
+
+    from flask import current_app
+
+    session_id = (payload.get("session_id") or create_session_id()).strip()
+    model = (payload.get("model") or get_default_model()).strip()
+    page = (payload.get("page") or "agent").strip()
+
+    service = current_app.extensions["agent_service"]
+    result = service.stream_chat(
+        session_id=session_id,
+        message=message,
+        model=model,
+        attachments=payload.get("attachments", []),
+        selected_code=payload.get("selected_code", ""),
+        filename=payload.get("filename", ""),
+        page=page,
+    )
+
+    return jsonify(
+        {
+            "ok": True,
+            "session_id": session_id,
+            "model": model,
+            "response": result.get("response", ""),
+        }
+    )
