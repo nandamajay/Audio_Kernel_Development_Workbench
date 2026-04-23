@@ -19,8 +19,10 @@
   </div>
   <div id="patchPathListing" class="panel small-muted">PatchWise module will be implemented in Phase 3.</div>
 </div>
+{% include "components/folder_browser_modal.html" %}
 {% endblock %}
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/folder_browser.js') }}"></script>
 <script>
 (function () {
   const input = document.getElementById('patchPathInput');
@@ -48,7 +50,16 @@
     localStorage.setItem(modelKey, model.value);
   });
 
-  document.getElementById('patchBrowseBtn').addEventListener('click', refresh);
+  document.getElementById('patchBrowseBtn').addEventListener('click', function () {
+    if (!window.AKDWFolderBrowser) return;
+    window.AKDWFolderBrowser.open({
+      startPath: input.value.trim() || '/app/kernel',
+      onSelect: function (selectedPath) {
+        input.value = selectedPath;
+        refresh();
+      },
+    });
+  });
   document.getElementById('patchApplyBtn').addEventListener('click', refresh);
   refresh();
 })();

@@ -18,6 +18,9 @@ window.AKDWTerminal = (function () {
 
     const socket = opts.socket;
     const sessionId = opts.sessionId;
+    const getSessionId = typeof opts.getSessionId === 'function'
+      ? opts.getSessionId
+      : function () { return sessionId; };
 
     window.addEventListener('resize', function () {
       try { fitAddon.fit(); } catch (_) {}
@@ -25,7 +28,7 @@ window.AKDWTerminal = (function () {
 
     if (socket) {
       socket.on('terminal_output', function (msg) {
-        if (msg && msg.session_id && msg.session_id !== sessionId) return;
+        if (msg && msg.session_id && msg.session_id !== getSessionId()) return;
         term.write((msg && msg.data) || '');
       });
     }

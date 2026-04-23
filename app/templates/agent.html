@@ -47,17 +47,41 @@
   const socket = io();
   const sessionKey = 'akdw_agent_session';
   const modelKey = 'akdw_agent_model';
-  let sessionId = localStorage.getItem(sessionKey) || ('sess-agent-' + Math.random().toString(36).slice(2, 10));
+  let sessionId = null;
+  let selectedHistorySessionId = null;
   let activeModel = localStorage.getItem(modelKey) || '{{ default_model }}';
   let replayMode = false;
   let attached = [];
 
-  document.getElementById('agentSessionLabel').textContent = sessionId;
-  document.getElementById('agentModel').value = activeModel;
-  localStorage.setItem(sessionKey, sessionId);
+  function createSessionId() {
+    return 'sess-agent-' + Math.random().toString(36).slice(2, 10);
+  }
 
-  socket.emit('join_agent_session', {session_id: sessionId});
-  window.AKDWTerminal.init({ containerId: 'agentTerminal', socket: socket, sessionId: sessionId });
+  function clearConversationView() {
+    document.getElementById('agentMessages').innerHTML = '';
+    document.getElementById('agentSteps').innerHTML = '';
+  }
+
+  function createNewSession() {
+    sessionId = createSessionId();
+    selectedHistorySessionId = null;
+    attached = [];
+    renderAttachPills();
+    clearConversationView();
+    setReplayMode(false);
+    localStorage.setItem(sessionKey, sessionId);
+    document.getElementById('agentSessionLabel').textContent = sessionId;
+    socket.emit('join_agent_session', {session_id: sessionId});
+  }
+
+  document.getElementById('agentSessionLabel').textContent = '-';
+  document.getElementById('agentModel').value = activeModel;
+  window.AKDWTerminal.init({
+    containerId: 'agentTerminal',
+    socket: socket,
+    sessionId: '',
+    getSessionId: function () { return sessionId; },
+  });
 
   function setReplayMode(enabled) {
     replayMode = enabled;
@@ -213,11 +237,12 @@
 
   async function openReplay(id) {
     setReplayMode(true);
+    selectedHistorySessionId = id;
     sessionId = id;
     localStorage.setItem(sessionKey, sessionId);
     document.getElementById('agentSessionLabel').textContent = sessionId;
-    document.getElementById('agentMessages').innerHTML = '';
-    document.getElementById('agentSteps').innerHTML = '';
+    clearConversationView();
+    socket.emit('join_agent_session', {session_id: sessionId});
 
     const res = await fetch('/agent/sessions/' + encodeURIComponent(id) + '/messages');
     const data = await res.json();
@@ -237,7 +262,10 @@
   }
 
   document.getElementById('continueSessionBtn').addEventListener('click', async function () {
+    if (!selectedHistorySessionId) return;
+    sessionId = selectedHistorySessionId;
     await fetch('/agent/sessions/' + encodeURIComponent(sessionId) + '/continue', { method: 'POST' });
+    socket.emit('join_agent_session', {session_id: sessionId});
     setReplayMode(false);
   });
 
@@ -286,6 +314,7 @@
     document.getElementById('agentSessionLabel').textContent = sessionId;
   });
 
+  createNewSession();
   loadHistory();
 })();
 </script>

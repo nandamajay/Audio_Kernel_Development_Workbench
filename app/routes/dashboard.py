@@ -14,7 +14,13 @@ from app.config import (
     get_user_display_name,
 )
 from app.models import ConversionJob, PatchRecord, TriageSession
-from app.services.env_service import current_username, load_env_values, save_env_values, validate_qgenie_key
+from app.services.env_service import (
+    current_username,
+    load_env_values,
+    resolve_ssl_verify,
+    save_env_values,
+    validate_qgenie_key,
+)
 
 
 dashboard_bp = Blueprint("dashboard", __name__)
@@ -35,14 +41,18 @@ def _refresh_runtime_config(updates: dict) -> None:
         if env_key in updates:
             current_app.config[config_key] = updates[env_key]
 
-    verify_ssl = str(current_app.config.get("QGENIE_SSL_VERIFY", "true")).lower() == "true"
-    ca_bundle = (current_app.config.get("QGENIE_CA_BUNDLE") or "").strip()
-    if verify_ssl and ca_bundle:
-        os.environ["REQUESTS_CA_BUNDLE"] = ca_bundle
-        os.environ["SSL_CERT_FILE"] = ca_bundle
+    resolved_verify = resolve_ssl_verify(
+        ssl_verify_raw=current_app.config.get("QGENIE_SSL_VERIFY", "true"),
+        ca_bundle=(current_app.config.get("QGENIE_CA_BUNDLE") or "").strip(),
+    )
+    if isinstance(resolved_verify, str):
+        os.environ["REQUESTS_CA_BUNDLE"] = resolved_verify
+        os.environ["SSL_CERT_FILE"] = resolved_verify
+        os.environ["CURL_CA_BUNDLE"] = resolved_verify
     else:
         os.environ.pop("REQUESTS_CA_BUNDLE", None)
         os.environ.pop("SSL_CERT_FILE", None)
+        os.environ.pop("CURL_CA_BUNDLE", None)
 
 
 @dashboard_bp.get("/")
@@ -87,8 +97,15 @@ def validate_setup_key():
     payload = request.get_json() or {}
     api_key = payload.get("api_key", "")
     provider_url = payload.get("provider_url", Config.QGENIE_PROVIDER_URL)
-    ssl_verify = payload.get("ssl_verify", current_app.config.get("QGENIE_SSL_VERIFY", "true"))
-    ca_bundle = payload.get("ca_bundle", current_app.config.get("QGENIE_CA_BUNDLE", ""))
+    ssl_verify = payload.get("ssl_verify", os.environ.get("QGENIE_SSL_VERIFY", "true"))
+    ca_bundle = payload.get("ca_bundle", os.environ.get("QGENIE_CA_BUNDLE", ""))
+    resolved_verify = resolve_ssl_verify(ssl_verify_raw=ssl_verify, ca_bundle=ca_bundle)
+    if isinstance(resolved_verify, str):
+        os.environ["REQUESTS_CA_BUNDLE"] = resolved_verify
+        os.environ["SSL_CERT_FILE"] = resolved_verify
+    elif resolved_verify is False:
+        os.environ.pop("REQUESTS_CA_BUNDLE", None)
+        os.environ.pop("SSL_CERT_FILE", None)
     ok, message = validate_qgenie_key(api_key, provider_url, ssl_verify=ssl_verify, ca_bundle=ca_bundle)
     return jsonify({"ok": ok, "message": message}), (200 if ok else 400)
 
@@ -99,9 +116,9 @@ def save_setup():
     api_key = payload.get("api_key", "").strip()
     provider_url = payload.get("provider_url", Config.QGENIE_PROVIDER_URL).strip()
     user_display_name = payload.get("user_display_name", "").strip() or current_username()
-    ssl_verify_raw = payload.get("ssl_verify", current_app.config.get("QGENIE_SSL_VERIFY", "true"))
+    ssl_verify_raw = payload.get("ssl_verify", os.environ.get("QGENIE_SSL_VERIFY", "true"))
     ssl_verify = "true" if str(ssl_verify_raw).lower() == "true" else "false"
-    ca_bundle = (payload.get("ca_bundle", current_app.config.get("QGENIE_CA_BUNDLE", "")) or "").strip()
+    ca_bundle = (payload.get("ca_bundle", os.environ.get("QGENIE_CA_BUNDLE", "")) or "").strip()
 
     ok, message = validate_qgenie_key(api_key, provider_url, ssl_verify=ssl_verify, ca_bundle=ca_bundle)
     if not ok:
@@ -136,8 +153,8 @@ def settings_page():
 @dashboard_bp.post("/api/settings")
 def save_settings():
     payload = request.get_json() or {}
-    ssl_verify_raw = payload.get("ssl_verify", current_app.config.get("QGENIE_SSL_VERIFY", "true"))
-    ca_bundle_raw = payload.get("ca_bundle", current_app.config.get("QGENIE_CA_BUNDLE", ""))
+    ssl_verify_raw = payload.get("ssl_verify", os.environ.get("QGENIE_SSL_VERIFY", "true"))
+    ca_bundle_raw = payload.get("ca_bundle", os.environ.get("QGENIE_CA_BUNDLE", ""))
     updates = {
         "USER_DISPLAY_NAME": (payload.get("user_display_name") or "").strip(),
         "QGENIE_DEFAULT_MODEL": (payload.get("default_model") or "auto").strip(),

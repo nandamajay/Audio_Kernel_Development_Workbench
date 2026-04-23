@@ -66,11 +66,13 @@
     </aside>
   </div>
 </div>
+{% include "components/folder_browser_modal.html" %}
 {% endblock %}
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/terminal.js') }}"></script>
 <script src="{{ url_for('static', filename='js/diff_viewer.js') }}"></script>
+<script src="{{ url_for('static', filename='js/folder_browser.js') }}"></script>
 <script src="{{ url_for('static', filename='js/editor.js') }}"></script>
 <script>
   window.addEventListener('DOMContentLoaded', function () {

@@ -300,7 +300,17 @@ window.AKDWEditor = (function () {
       loadTree(document.getElementById('pathInput').value);
     });
     document.getElementById('browsePathBtn').addEventListener('click', function () {
-      loadTree(document.getElementById('pathInput').value);
+      if (!window.AKDWFolderBrowser) {
+        loadTree(document.getElementById('pathInput').value);
+        return;
+      }
+      window.AKDWFolderBrowser.open({
+        startPath: document.getElementById('pathInput').value || '/app/kernel',
+        onSelect: function (selectedPath) {
+          document.getElementById('pathInput').value = selectedPath;
+          loadTree(selectedPath);
+        },
+      });
     });
 
     document.getElementById('modelSelect').addEventListener('change', function (e) {

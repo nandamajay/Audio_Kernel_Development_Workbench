@@ -13,6 +13,7 @@ from app.config import Config, is_first_run
 from app.models import db
 from app.routes import ALL_BLUEPRINTS
 from app.services.agent_service import AgentService
+from app.services.env_service import resolve_ssl_verify
 from app.services.fs_service import ensure_workspace_structure
 from app.socket_handlers import register_socket_handlers
 
@@ -77,11 +78,15 @@ def _ensure_directories(app):
 
 
 def _apply_qgenie_tls_env(app):
-    verify_ssl = str(app.config.get("QGENIE_SSL_VERIFY", True)).lower() == "true"
-    ca_bundle = (app.config.get("QGENIE_CA_BUNDLE") or "").strip()
-    if verify_ssl and ca_bundle:
-        os.environ["REQUESTS_CA_BUNDLE"] = ca_bundle
-        os.environ["SSL_CERT_FILE"] = ca_bundle
+    verify = resolve_ssl_verify(
+        ssl_verify_raw=app.config.get("QGENIE_SSL_VERIFY", True),
+        ca_bundle=(app.config.get("QGENIE_CA_BUNDLE") or "").strip(),
+    )
+    if isinstance(verify, str):
+        os.environ["REQUESTS_CA_BUNDLE"] = verify
+        os.environ["SSL_CERT_FILE"] = verify
+        os.environ["CURL_CA_BUNDLE"] = verify
     else:
         os.environ.pop("REQUESTS_CA_BUNDLE", None)
         os.environ.pop("SSL_CERT_FILE", None)
+        os.environ.pop("CURL_CA_BUNDLE", None)

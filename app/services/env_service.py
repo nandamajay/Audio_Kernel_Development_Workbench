@@ -10,29 +10,38 @@ import requests
 from requests.exceptions import SSLError
 from dotenv import dotenv_values, set_key
 
-from app.config import ENV_PATH, get_qgenie_verify, load_env
+from app.config import ENV_PATH, load_env
+
+
+def resolve_ssl_verify(
+    ssl_verify_raw: str | bool | None = None,
+    ca_bundle: str | None = None,
+) -> bool | str:
+    """
+    Resolve TLS verification mode at request time using runtime env/config.
+    """
+    verify_source = ssl_verify_raw
+    if verify_source is None:
+        verify_source = os.environ.get("QGENIE_SSL_VERIFY", "true")
+    bundle_source = ca_bundle
+    if bundle_source is None:
+        bundle_source = os.environ.get("QGENIE_CA_BUNDLE", "")
+
+    if str(verify_source).lower() == "false":
+        return False
+
+    bundle = (bundle_source or "").strip()
+    if bundle and os.path.exists(bundle):
+        return bundle
+
+    return True
 
 
 def _resolve_verify(
     ssl_verify: str | bool | None = None,
     ca_bundle: str | None = None,
 ) -> bool | str:
-    if ssl_verify is None and ca_bundle is None:
-        return get_qgenie_verify()
-
-    verify_ssl = True
-    if isinstance(ssl_verify, bool):
-        verify_ssl = ssl_verify
-    elif ssl_verify is not None:
-        verify_ssl = str(ssl_verify).lower() == "true"
-
-    if not verify_ssl:
-        return False
-
-    bundle = (ca_bundle or "").strip()
-    if bundle:
-        return bundle
-    return True
+    return resolve_ssl_verify(ssl_verify_raw=ssl_verify, ca_bundle=ca_bundle)
 
 
 def load_env_values() -> Dict[str, str]:
@@ -61,12 +70,13 @@ def validate_qgenie_key(
 
     url = provider_url.rstrip("/") + "/models"
     headers = {"Authorization": f"Bearer {api_key}"}
-    verify = _resolve_verify(ssl_verify=ssl_verify, ca_bundle=ca_bundle)
 
-    if isinstance(verify, str):
-        bundle = Path(verify)
-        if not bundle.exists():
-            return False, f"CA bundle path not found: {verify}"
+    if str(ssl_verify).lower() != "false":
+        explicit_bundle = (ca_bundle or "").strip()
+        if explicit_bundle and not Path(explicit_bundle).exists():
+            return False, f"CA bundle path not found: {explicit_bundle}"
+
+    verify = _resolve_verify(ssl_verify=ssl_verify, ca_bundle=ca_bundle)
 
     try:
         response = requests.get(url, headers=headers, timeout=8, verify=verify)

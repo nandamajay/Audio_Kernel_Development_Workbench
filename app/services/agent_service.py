@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 from flask import current_app, has_app_context
 
 from app.config import get_default_model
+from app.services.env_service import resolve_ssl_verify
 from app.services.session_service import append_message, ensure_session
 
 ANSI_RESET = "\x1b[0m"
@@ -24,6 +25,38 @@ ANSI_CYAN = "\x1b[36m"
 
 TOOL_CALL_RE = re.compile(r"^(?:TOOL_CALL:|CALL:)\s*([^\s{]+)?\s*(\{.*\})?\s*$", re.IGNORECASE)
 TOOL_RESULT_RE = re.compile(r"^(?:TOOL_RESULT:|RESULT:)\s*(.*)$", re.IGNORECASE)
+URL_RE = re.compile(r"https?://[^\s<>()]+", re.IGNORECASE)
+
+AGENT_SYSTEM_PROMPT = (
+    "You are AKDW's senior Linux audio/kernel assistant. "
+    "You have a fetch_url tool. When the user gives you a URL "
+    "(LKML, lore.kernel.org, GitHub, patchwork), ALWAYS call fetch_url first "
+    "to read the content before responding. Never say you cannot access URLs."
+)
+
+AGENT_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_url",
+            "description": (
+                "Fetch the text content of a URL. Use for LKML threads, kernel "
+                "patches, GitHub commits, or any web page the user references. "
+                "Returns the page text content (truncated to 8000 chars if large)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The full URL to fetch",
+                    }
+                },
+                "required": ["url"],
+            },
+        },
+    }
+]
 
 
 def colorize_terminal_line(line: str) -> str:
@@ -145,6 +178,66 @@ class AgentService:
             )
         return "\n\n".join([chunk for chunk in chunks if chunk])
 
+    def _apply_runtime_tls_settings(self) -> bool | str:
+        ssl_verify_raw = os.environ.get("QGENIE_SSL_VERIFY", "true")
+        ca_bundle = os.environ.get("QGENIE_CA_BUNDLE", None)
+        ssl_verify = resolve_ssl_verify(ssl_verify_raw=ssl_verify_raw, ca_bundle=ca_bundle)
+        if isinstance(ssl_verify, str):
+            os.environ["REQUESTS_CA_BUNDLE"] = ssl_verify
+            os.environ["SSL_CERT_FILE"] = ssl_verify
+            os.environ["CURL_CA_BUNDLE"] = ssl_verify
+        elif ssl_verify is False:
+            os.environ.pop("REQUESTS_CA_BUNDLE", None)
+            os.environ.pop("SSL_CERT_FILE", None)
+            os.environ.pop("CURL_CA_BUNDLE", None)
+        return ssl_verify
+
+    def _extract_urls(self, text: str) -> List[str]:
+        seen = set()
+        ordered: List[str] = []
+        for match in URL_RE.findall(text or ""):
+            if match in seen:
+                continue
+            seen.add(match)
+            ordered.append(match)
+        return ordered
+
+    def handle_fetch_url(self, url: str) -> str:
+        import requests
+
+        verify = self._apply_runtime_tls_settings()
+        try:
+            resp = requests.get(
+                url,
+                timeout=10,
+                verify=verify,
+                headers={"User-Agent": "AKDW/1.0"},
+            )
+            resp.raise_for_status()
+            text = resp.text
+            try:
+                from bs4 import BeautifulSoup
+
+                soup = BeautifulSoup(resp.text, "html.parser")
+                pre_blocks = soup.find_all("pre")
+                if pre_blocks:
+                    text = "\n".join(node.get_text() for node in pre_blocks)
+                else:
+                    text = soup.get_text(separator="\n")
+            except Exception:
+                text = resp.text
+            text = (text or "").strip()
+            if len(text) > 8000:
+                return text[:8000] + "\n[... truncated ...]"
+            return text
+        except Exception as exc:
+            return f"[fetch_url error: {exc}]"
+
+    def _dispatch_tool(self, tool_name: str, tool_args: Dict[str, Any]) -> str:
+        if tool_name == "fetch_url":
+            return self.handle_fetch_url(tool_args.get("url", ""))
+        return f"[tool dispatch error: unknown tool '{tool_name}']"
+
     def _runtime_qgenie_config(self) -> Dict[str, str]:
         if has_app_context():
             return {
@@ -172,6 +265,7 @@ class AgentService:
         runtime_cfg = self._runtime_qgenie_config()
         api_key = runtime_cfg["api_key"]
         provider_url = runtime_cfg["provider_url"]
+        self._apply_runtime_tls_settings()
 
         if not api_key:
             return "QGENIE_API_KEY is not configured; returning simulated response."
@@ -264,7 +358,8 @@ class AgentService:
     ) -> Dict[str, Any]:
         active_model = (model or get_default_model()).strip() or get_default_model()
         files = attachments or []
-        prompt = self.build_user_prompt(message, files)
+        user_prompt = self.build_user_prompt(message, files)
+        prompt = AGENT_SYSTEM_PROMPT + "\n\nUser request:\n" + user_prompt
 
         if has_app_context():
             ensure_session(session_id=session_id, page=page, model=active_model)
@@ -297,10 +392,41 @@ class AgentService:
                 )
             )
 
+        url_context_chunks: List[str] = []
+        for url in self._extract_urls(user_prompt):
+            tool_name = "fetch_url"
+            tool_args = {"url": url}
+            call_step = AgentStep(
+                type="tool_call",
+                content=f"TOOL_CALL: {tool_name} {json.dumps(tool_args)}",
+                tool_name=tool_name,
+                tool_args=tool_args,
+            )
+            pre_steps.append(call_step)
+
+            result = self._dispatch_tool(tool_name, tool_args)
+            result_step = AgentStep(
+                type="tool_result",
+                content=result,
+                tool_name=tool_name,
+                tool_args=tool_args,
+            )
+            pre_steps.append(result_step)
+            url_context_chunks.append(f"Fetched URL: {url}\n\n{result}")
+
         for step in pre_steps:
             self.emit_step(session_id, step)
             self.emit_terminal_line(session_id, step.content + "\n")
             self._persist_step(session_id, step)
+
+        if url_context_chunks:
+            prompt = (
+                AGENT_SYSTEM_PROMPT
+                + "\n\nFetched URL content:\n\n"
+                + "\n\n---\n\n".join(url_context_chunks)
+                + "\n\nUser request:\n"
+                + user_prompt
+            )
 
         assistant_text = self._try_qgenie_chat(active_model, prompt)
         parsed_steps = parse_stream_steps(assistant_text)

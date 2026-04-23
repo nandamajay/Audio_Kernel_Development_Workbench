@@ -4,10 +4,13 @@
   --border: #30363d;
   --accent-primary: #238636;
   --accent-info: #1f6feb;
+  --accent-blue: #1f6feb;
   --text-primary: #e6edf3;
   --text-muted: #8b949e;
   --error: #f85149;
   --warning: #d29922;
+  --glass-bg: rgba(22, 27, 34, 0.88);
+  --glass-border: rgba(48, 54, 61, 0.9);
 }
 
 * { box-sizing: border-box; }
@@ -277,4 +280,78 @@ body {
 @media (max-width: 1200px) {
   .agent-layout { grid-template-columns: 1fr; }
   .panel-grid { grid-template-columns: 1fr; }
+}
+
+.folder-browser-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+}
+
+.folder-browser-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(1, 4, 9, 0.55);
+}
+
+.folder-browser-panel {
+  position: relative;
+  width: min(760px, 92vw);
+  max-height: 78vh;
+  margin: 7vh auto 0;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(20px);
+  border-radius: 12px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.folder-browser-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.folder-browser-header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.folder-browser-path {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.folder-browser-entries {
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  min-height: 260px;
+  max-height: 44vh;
+  overflow: auto;
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.folder-entry {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 36, 0.75);
+  color: var(--text-primary);
+  border-radius: 8px;
+  text-align: left;
+  padding: 7px 9px;
+  cursor: pointer;
+}
+
+.folder-entry:hover {
+  border-color: var(--accent-blue);
+}
+
+.folder-browser-actions {
+  display: flex;
+  justify-content: flex-end;
 }
