@@ -92,6 +92,13 @@ window.AKDWPatchwise = (function () {
     return content.length > 0 || files.length > 0;
   }
 
+  function supportedPathFile(name) {
+    const lower = String(name || "").toLowerCase();
+    return [".patch", ".diff", ".c", ".h", ".log", ".txt"].some(function (ext) {
+      return lower.endsWith(ext);
+    });
+  }
+
   function setActionState() {
     const ready = hasPatchContent();
     const reviewBtn = document.getElementById("runReviewBtn");
@@ -122,7 +129,18 @@ window.AKDWPatchwise = (function () {
     if (role === "user") {
       row.textContent = text;
     } else {
-      row.innerHTML = asMarkdown(text);
+      row.innerHTML = '<button class="copy-btn" type="button" title="Copy response">📋</button>' +
+        '<div class="msg-content">' + asMarkdown(text) + "</div>";
+      const copyBtn = row.querySelector(".copy-btn");
+      if (copyBtn) {
+        copyBtn.addEventListener("click", function () {
+          const msg = row.querySelector(".msg-content");
+          navigator.clipboard.writeText(msg ? msg.innerText : "").then(function () {
+            copyBtn.textContent = "✅";
+            setTimeout(function () { copyBtn.textContent = "📋"; }, 1500);
+          });
+        });
+      }
     }
     box.appendChild(row);
     box.scrollTop = box.scrollHeight;
@@ -266,6 +284,8 @@ window.AKDWPatchwise = (function () {
   async function refreshPath() {
     const input = document.getElementById("patchPathInput");
     const listing = document.getElementById("patchPathListing");
+    const listEl = document.getElementById("patchFileList");
+    const onboarding = document.getElementById("onboardingPrompt");
     const path = input.value.trim() || "/app/kernel";
     localStorage.setItem(pathKey, path);
     const resp = await fetch("/api/fs/browse?path=" + encodeURIComponent(path));
@@ -275,7 +295,45 @@ window.AKDWPatchwise = (function () {
       return;
     }
     input.value = data.path;
-    listing.textContent = "Active path: " + data.path + " (" + (data.entries || []).length + " entries)";
+    const entries = (data.entries || []).filter(function (item) {
+      return item.type === "file" && supportedPathFile(item.name);
+    });
+    listing.textContent = "Active path: " + data.path + " (" + entries.length + " candidate files)";
+
+    if (!entries.length) {
+      listEl.innerHTML = '<div class="small-muted">No patch/source files found in this path.</div>';
+      return;
+    }
+
+    onboarding.style.display = "none";
+    listEl.innerHTML = "";
+    entries.forEach(function (entry) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "tree-row";
+      row.textContent = "📄 " + entry.name;
+      row.addEventListener("click", async function () {
+        const readRes = await fetch("/api/fs/read?path=" + encodeURIComponent(entry.path));
+        const readData = await readRes.json();
+        if (!readData.ok) {
+          document.getElementById("reviewSummary").textContent = readData.error || "Failed to load file";
+          return;
+        }
+        files = [{ name: entry.name, size: (readData.content || "").length, content: readData.content || "" }];
+        hasResults = false;
+        reviewStarted = false;
+        exportedReport = false;
+        document.getElementById("patchContent").value = readData.content || "";
+        renderFiles();
+        setStepState(true, false, false, false);
+        setActionState();
+      });
+      listEl.appendChild(row);
+    });
+
+    if (entries.length === 1) {
+      listEl.querySelector("button")?.click();
+    }
   }
 
   function evidenceTemplate(findingId, subject) {

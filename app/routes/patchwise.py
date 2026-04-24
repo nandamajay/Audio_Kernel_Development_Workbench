@@ -21,6 +21,7 @@ from werkzeug.utils import secure_filename
 
 from app.config import MODEL_METADATA, get_available_models, get_default_model
 from app.models import ReviewEvidence, ReviewSession, db
+from app.services.activity_service import log_activity
 from app.services.env_service import resolve_ssl_verify
 
 
@@ -40,7 +41,34 @@ def _ensure_upload_dir() -> str:
 
 
 def _allowed_patch_dirs() -> List[str]:
-    return ["/app/kernel", "/app/uploads", "/tmp", tempfile.gettempdir()]
+    roots = [
+        "/app/kernel",
+        "/app/patches",
+        "/app/uploads",
+        "/tmp",
+        "/tmp/akdw-uploads",
+        tempfile.gettempdir(),
+    ]
+    kernel_env = os.environ.get("KERNEL_SOURCE_PATH") or os.environ.get("KERNEL_SRC_PATH")
+    if kernel_env:
+        roots.append(kernel_env)
+    try:
+        cfg_root = current_app.config.get("KERNEL_SRC_PATH")
+        if cfg_root:
+            roots.append(cfg_root)
+    except Exception:
+        pass
+    dedup = []
+    seen = set()
+    for item in roots:
+        if not item:
+            continue
+        path = os.path.realpath(item)
+        if path in seen:
+            continue
+        seen.add(path)
+        dedup.append(path)
+    return dedup
 
 
 def _is_allowed_patch_path(path_value: str) -> bool:
@@ -397,6 +425,7 @@ def review_patch():
     row.ai_summary = ai_summary
     row.updated_at = datetime.utcnow()
     db.session.commit()
+    log_activity("Reviewed patch: " + (row.patch_filename or session_id), "review")
 
     return jsonify({
         "ok": True,
