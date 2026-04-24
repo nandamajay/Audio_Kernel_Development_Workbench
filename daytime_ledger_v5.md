@@ -22,3 +22,9 @@ Generated: 2026-04-24
 - Test: `curl -s http://localhost:5001/patchwise/ | grep -c "step-indicator|onboarding|btn-disabled|patch-context"`
 - Result: `11` (>0)
 - Notes: Added step indicator states, onboarding prompt, contextual action enable/disable flow, results placeholder, and messenger-style patch assistant with patch context injection.
+
+## Section 3 — Triage Guided Input + Workflow UX
+- Status: PASS
+- Test: `curl -s http://localhost:5001/triage/ | grep -c "triage-onboarding|crash-input|sample-inputs"`
+- Result: `7` (>0)
+- Notes: Added triage onboarding hero, terminal-style crash textarea with drag/drop, sample scenarios, triage step indicator, and structured results cards.

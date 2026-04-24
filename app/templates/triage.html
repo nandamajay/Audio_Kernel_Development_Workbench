@@ -1,40 +1,335 @@
 {% extends "base.html" %}
 {% block title %}Triage{% endblock %}
+
+{% block head %}
+<style>
+  .triage-shell {
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+    gap: 12px;
+    min-height: calc(100vh - 130px);
+  }
+
+  .triage-step-indicator {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr auto 1fr;
+    gap: 8px;
+    align-items: center;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .triage-step {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-muted);
+    font-weight: 600;
+    font-size: 13px;
+  }
+
+  .triage-step-dot {
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    border: 1px solid var(--glass-border);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .triage-step.active { color: #cfe1ff; }
+  .triage-step.active .triage-step-dot {
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+    background: rgba(59, 130, 246, 0.2);
+  }
+  .triage-step.completed .triage-step-dot {
+    border-color: var(--accent-green);
+    color: var(--accent-green);
+    background: rgba(16, 185, 129, 0.2);
+  }
+  .triage-step-line {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.15);
+  }
+
+  .triage-grid {
+    display: grid;
+    grid-template-columns: 1fr 420px;
+    gap: 12px;
+    min-height: 0;
+  }
+
+  .triage-main,
+  .triage-results {
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    background: rgba(255, 255, 255, 0.03);
+    padding: 14px;
+    min-height: 0;
+    overflow: auto;
+  }
+
+  .triage-onboarding {
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 12px;
+    background: var(--gradient-card);
+    padding: 18px;
+    display: grid;
+    gap: 10px;
+  }
+
+  .crash-input {
+    width: 100%;
+    min-height: 220px;
+    border-radius: 10px;
+    border: 1px solid var(--glass-border);
+    background: #0a0e1a;
+    color: #10b981;
+    font-family: "IBM Plex Mono", monospace;
+    padding: 12px;
+    resize: vertical;
+  }
+
+  .crash-input.dragging {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+  }
+
+  .triage-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .sample-inputs {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .triage-placeholder {
+    border: 1px dashed var(--glass-border);
+    border-radius: 12px;
+    padding: 14px;
+    color: var(--text-muted);
+    display: grid;
+    gap: 8px;
+  }
+
+  .triage-card {
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    padding: 10px;
+    margin-top: 10px;
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .triage-card h4 {
+    margin: 0 0 8px;
+    font-size: 13px;
+  }
+
+  @media (max-width: 1200px) {
+    .triage-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="dashboard-wrap">
+<div class="triage-shell">
   <div class="editor-toolbar-row">
     <div class="path-switcher">
       <input id="triagePathInput" class="input" value="/app/kernel">
-      <button id="triageBrowseBtn" class="btn-secondary">📂 Browse</button>
-      <button id="triageApplyBtn" class="btn-primary">Apply</button>
+      <button id="triageBrowseBtn" class="btn-secondary" type="button">📂 Browse</button>
+      <button id="triageApplyBtn" class="btn-primary" type="button">Apply</button>
     </div>
+    <div id="triagePathListing" class="small-muted">Active path: /app/kernel</div>
   </div>
-  <div id="triagePathListing" class="panel small-muted">Triage module will be implemented in Phase 5.</div>
+
+  <div class="triage-step-indicator">
+    <div id="triageStep1" class="triage-step active"><span class="triage-step-dot">1</span><span>Input Log</span></div>
+    <span class="triage-step-line"></span>
+    <div id="triageStep2" class="triage-step"><span class="triage-step-dot">2</span><span>Analyze</span></div>
+    <span class="triage-step-line"></span>
+    <div id="triageStep3" class="triage-step"><span class="triage-step-dot">3</span><span>Review Findings</span></div>
+  </div>
+
+  <div class="triage-grid">
+    <section class="triage-main">
+      <div class="triage-onboarding">
+        <h3>🩺 Kernel Issue Triage</h3>
+        <p>Paste a crash dump, oops, dmesg log, or kernel panic output and QGenie will identify root cause, suggest fixes, and link likely related commits.</p>
+        <textarea id="crashInput" class="crash-input" placeholder="[ 1234.567890] BUG: unable to handle kernel NULL pointer
+[ 1234.567891] IP: snd_soc_component_read+0x4c/0x80
+
+Paste crash log / oops / dmesg here...
+(or drag & drop a .log / .txt file below)"></textarea>
+        <div class="triage-actions">
+          <input id="triageFileInput" type="file" accept=".log,.txt" style="display:none">
+          <button id="uploadLogBtn" class="btn-secondary" type="button">📂 Upload Log File</button>
+          <button id="startTriageBtn" class="btn-primary" type="button">▶ Start Triage</button>
+        </div>
+        <div class="small-muted">-- OR use example inputs --</div>
+        <div class="sample-inputs">
+          <button id="samplePanicBtn" class="btn-secondary" type="button">💥 Kernel Panic</button>
+          <button id="sampleAudioBtn" class="btn-secondary" type="button">📋 Audio Oops</button>
+          <button id="sampleLockBtn" class="btn-secondary" type="button">🔒 Lock Warning</button>
+        </div>
+      </div>
+    </section>
+
+    <aside class="triage-results">
+      <h3>🔍 Triage Results</h3>
+      <div id="triageResultsPlaceholder" class="triage-placeholder">
+        Results will appear here after you click <strong>Start Triage</strong>.
+      </div>
+      <div id="triageResults"></div>
+    </aside>
+  </div>
 </div>
 {% endblock %}
+
 {% block scripts %}
 <script>
 (function () {
-  const input = document.getElementById('triagePathInput');
-  const listing = document.getElementById('triagePathListing');
-  const key = 'akdw_triage_path';
-  input.value = localStorage.getItem(key) || '/app/kernel';
+  const key = "akdw_triage_path";
+  const sampleInputs = {
+    panic: "[ 420.777001] BUG: kernel NULL pointer dereference, address: 0000000000000008\\n[ 420.777102] IP: snd_soc_component_read+0x4c/0x80\\n[ 420.777214] Call Trace:\\n[ 420.777298]  qcom_lpass_hw_params+0x1d8/0x280\\n[ 420.777390]  snd_soc_dai_hw_params+0x10f/0x180",
+    audio: "[ 877.003002] Unable to handle kernel paging request at virtual address 0x0\\n[ 877.003104] pc : q6asm_run_nowait+0x90/0x1b0\\n[ 877.003205] lr : q6asm_open_write+0x60/0xb0\\n[ 877.003302] Call trace:\\n[ 877.003401]  q6routing_stream_open+0x118/0x170",
+    lock: "[ 111.225501] WARNING: possible circular locking dependency detected\\n[ 111.225690] CPU: 3 PID: 2786 Comm: alsa-sink\\n[ 111.225888] lockdep: q6afe_lock -> afe_port_lock\\n[ 111.226084] stack backtrace:\\n[ 111.226195]  dump_stack_lvl+0x54/0x8c",
+  };
 
-  async function refresh() {
-    const path = input.value.trim();
-    localStorage.setItem(key, path);
-    const resp = await fetch('/api/fs/browse?path=' + encodeURIComponent(path));
-    const data = await resp.json();
-    if (!data.ok) {
-      listing.textContent = data.error || 'Path not allowed';
-      return;
-    }
-    listing.textContent = 'Active path: ' + data.path + ' (' + (data.entries || []).length + ' entries)';
+  function setStep(state) {
+    const s1 = document.getElementById("triageStep1");
+    const s2 = document.getElementById("triageStep2");
+    const s3 = document.getElementById("triageStep3");
+    s1.className = "triage-step";
+    s2.className = "triage-step";
+    s3.className = "triage-step";
+    if (state === 1) { s1.classList.add("active"); return; }
+    if (state === 2) { s1.classList.add("completed"); s2.classList.add("active"); return; }
+    s1.classList.add("completed");
+    s2.classList.add("completed");
+    s3.classList.add("active");
   }
 
-  document.getElementById('triageBrowseBtn').addEventListener('click', refresh);
-  document.getElementById('triageApplyBtn').addEventListener('click', refresh);
-  refresh();
+  async function refreshPath() {
+    const input = document.getElementById("triagePathInput");
+    const listing = document.getElementById("triagePathListing");
+    const path = input.value.trim() || "/app/kernel";
+    localStorage.setItem(key, path);
+    const resp = await fetch("/api/fs/browse?path=" + encodeURIComponent(path));
+    const data = await resp.json();
+    if (!data.ok) {
+      listing.textContent = data.error || "Path not allowed";
+      return;
+    }
+    input.value = data.path;
+    listing.textContent = "Active path: " + data.path + " (" + (data.entries || []).length + " entries)";
+  }
+
+  function renderResults(rawText) {
+    const root = document.getElementById("triageResults");
+    document.getElementById("triageResultsPlaceholder").style.display = "none";
+    root.innerHTML = "";
+    const text = String(rawText || "No response").trim();
+    const lines = text.split("\\n").filter(Boolean);
+    const rootCause = lines.slice(0, 3).join(" ");
+    const fix = lines.slice(3, 7).join(" ") || "Check pointer validity, probe ordering, and locking around ASoC component paths.";
+
+    root.innerHTML = [
+      '<div class="triage-card"><h4>🔴 ROOT CAUSE</h4><div>' + rootCause + "</div></div>",
+      '<div class="triage-card"><h4>🔧 SUGGESTED FIX</h4><div>' + fix + "</div></div>",
+      '<div class="triage-card"><h4>📎 RELATED COMMITS</h4><div><a class=\"chat-link\" target=\"_blank\" rel=\"noopener\" href=\"https://lore.kernel.org/all/?q=ASoC+fix\">🔗 LKML search results</a></div></div>",
+    ].join("");
+  }
+
+  async function startTriage() {
+    const text = document.getElementById("crashInput").value.trim();
+    if (!text) return;
+    setStep(2);
+    const payload = {
+      session_id: "triage-" + Math.random().toString(36).slice(2, 10),
+      page: "triage",
+      message: "Analyze this kernel crash log and provide root cause, fix, and likely related commits:\\n\\n" + text,
+    };
+    const resp = await fetch("/api/agent/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    renderResults(data.response || data.content || data.message || "");
+    setStep(3);
+  }
+
+  function wireDnD() {
+    const input = document.getElementById("crashInput");
+    ["dragenter", "dragover"].forEach(function (evt) {
+      input.addEventListener(evt, function (e) {
+        e.preventDefault();
+        input.classList.add("dragging");
+      });
+    });
+    ["dragleave", "drop"].forEach(function (evt) {
+      input.addEventListener(evt, function (e) {
+        e.preventDefault();
+        input.classList.remove("dragging");
+      });
+    });
+    input.addEventListener("drop", function (e) {
+      const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function () {
+        input.value = String(reader.result || "");
+        setStep(1);
+      };
+      reader.readAsText(file);
+    });
+  }
+
+  document.getElementById("triagePathInput").value = localStorage.getItem(key) || "/app/kernel";
+  document.getElementById("triageBrowseBtn").addEventListener("click", refreshPath);
+  document.getElementById("triageApplyBtn").addEventListener("click", refreshPath);
+  document.getElementById("startTriageBtn").addEventListener("click", startTriage);
+  document.getElementById("uploadLogBtn").addEventListener("click", function () {
+    document.getElementById("triageFileInput").click();
+  });
+  document.getElementById("triageFileInput").addEventListener("change", function (e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function () {
+      document.getElementById("crashInput").value = String(reader.result || "");
+      setStep(1);
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  });
+
+  document.getElementById("samplePanicBtn").addEventListener("click", function () {
+    document.getElementById("crashInput").value = sampleInputs.panic;
+    setStep(1);
+  });
+  document.getElementById("sampleAudioBtn").addEventListener("click", function () {
+    document.getElementById("crashInput").value = sampleInputs.audio;
+    setStep(1);
+  });
+  document.getElementById("sampleLockBtn").addEventListener("click", function () {
+    document.getElementById("crashInput").value = sampleInputs.lock;
+    setStep(1);
+  });
+
+  wireDnD();
+  refreshPath();
 })();
 </script>
 {% endblock %}
