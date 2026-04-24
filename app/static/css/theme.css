@@ -173,10 +173,10 @@ body {
 
 .input {
   width: 100%;
-  border: 1px solid var(--border);
-  background: #0f1724;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.03);
   color: var(--text-primary);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 10px;
 }
 .input.small { padding: 6px; font-size: 12px; }
@@ -186,13 +186,18 @@ body {
   align-items: center;
   justify-content: center;
   text-decoration: none;
-  border-radius: 8px;
+  border-radius: var(--radius-btn);
   padding: 8px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border);
   cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s;
 }
-.btn-primary { background: var(--accent-primary); color: #fff; }
-.btn-secondary { background: #253144; color: var(--text-primary); }
+.btn-primary { background: var(--gradient-hero); color: #fff; border: none; }
+.btn-secondary { background: rgba(255, 255, 255, 0.06); color: var(--text-primary); }
+.btn-primary:hover,
+.btn-secondary:hover {
+  transform: translateY(-1px);
+}
 .small-muted { color: var(--text-muted); font-size: 12px; }
 .warn-banner {
   padding: 10px;
@@ -443,6 +448,16 @@ body {
 .chat-row { border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin-bottom: 8px; white-space: pre-wrap; }
 .chat-row.user { background: rgba(31, 111, 235, 0.15); }
 .chat-row.assistant { background: rgba(22, 27, 34, 0.8); }
+.chat-link {
+  color: var(--accent-blue);
+  text-decoration: underline;
+  text-decoration-color: rgba(59, 130, 246, 0.4);
+  text-underline-offset: 2px;
+}
+.chat-link:hover {
+  color: #60a5fa;
+  text-decoration-color: #60a5fa;
+}
 .attach-pills { display: flex; flex-wrap: wrap; gap: 6px; }
 .file-pill {
   display: inline-flex;
@@ -501,6 +516,30 @@ body {
 @media (max-width: 1200px) {
   .agent-layout { grid-template-columns: 1fr; }
   .panel-grid { grid-template-columns: 1fr; }
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+@keyframes pulse {
+  0% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.92); }
+  100% { opacity: 1; transform: scale(1); }
 }
 
 .folder-browser-modal {

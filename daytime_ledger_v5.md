@@ -34,3 +34,13 @@ Generated: 2026-04-24
 - Test: 2-step context memory check via `/api/agent/chat`
 - Result: PASS (second response: "You previously mentioned: My patch adds ASoC codec support.")
 - Notes: Added markdown link renderer + bare URL linkify, fresh UUID session start behavior, and thinking bubble replacement with final response.
+
+## Section 5 — Global UI Consistency Pass
+- Status: PASS
+- Test:
+  - GET / -> 200
+  - GET /settings/ -> 200
+  - GET /editor/ -> 200
+  - GET /converter/ -> 200
+  - GET /triage/ -> 200
+- Notes: Applied token-consistent topbar/sidebar theme, settings glass card redesign, converter guided onboarding shell, editor assistant markdown-link rendering, and global scrollbar styling.

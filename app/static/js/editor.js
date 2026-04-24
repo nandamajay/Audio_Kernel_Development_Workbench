@@ -100,11 +100,35 @@ window.AKDWEditor = (function () {
     });
   }
 
+  function linkifyText(text) {
+    return (text || "").replace(
+      /(https?:\/\/[^\s<>"]+)/g,
+      '<a href="$1" target="_blank" rel="noopener noreferrer" class="chat-link">$1 ↗</a>'
+    );
+  }
+
+  function renderMarkdown(text) {
+    const linked = linkifyText(text || "");
+    if (!window.marked) return linked;
+    const renderer = new window.marked.Renderer();
+    renderer.link = function (href, title, txt) {
+      const tip = title || href;
+      return '<a href="' + href + '" target="_blank" rel="noopener noreferrer" class="chat-link" title="' + tip + '">' +
+        (txt || href) + ' ↗</a>';
+    };
+    window.marked.setOptions({ renderer: renderer, breaks: true });
+    return window.marked.parse(linked);
+  }
+
   function addChatBubble(role, content) {
     const list = document.getElementById('chatMessages');
     const row = document.createElement('div');
     row.className = role === 'user' ? 'chat-row user' : 'chat-row assistant';
-    row.textContent = content;
+    if (role === 'assistant') {
+      row.innerHTML = renderMarkdown(content || '');
+    } else {
+      row.textContent = content;
+    }
     list.appendChild(row);
     list.scrollTop = list.scrollHeight;
   }

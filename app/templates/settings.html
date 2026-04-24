@@ -1,8 +1,91 @@
 {% extends "base.html" %}
 {% block title %}Settings{% endblock %}
+
+{% block head %}
+<style>
+  .settings-shell {
+    min-height: calc(100vh - 160px);
+    display: grid;
+    place-items: center;
+    padding: 20px;
+  }
+
+  .settings-card {
+    width: min(720px, 98%);
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+    padding: 40px;
+    display: grid;
+    gap: 10px;
+  }
+
+  .settings-card h2 {
+    margin: 0 0 8px;
+  }
+
+  .settings-card .input {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    color: var(--text-primary);
+  }
+
+  .settings-card .input:focus {
+    border-color: var(--accent-blue);
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+  }
+
+  .settings-save {
+    background: var(--gradient-hero);
+    color: #fff;
+    border: none;
+    padding: 10px 28px;
+    border-radius: var(--radius-btn);
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.2s, transform 0.2s;
+  }
+
+  .settings-save:hover {
+    opacity: 0.9;
+    transform: translateY(-1px);
+  }
+
+  .settings-status {
+    min-height: 22px;
+    font-size: 13px;
+  }
+
+  .settings-status.ok,
+  .settings-status.err {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 6px 12px;
+    width: fit-content;
+  }
+
+  .settings-status.ok {
+    background: rgba(16, 185, 129, 0.15);
+    border: 1px solid rgba(16, 185, 129, 0.45);
+    color: #b8f7df;
+  }
+
+  .settings-status.err {
+    background: rgba(239, 68, 68, 0.14);
+    border: 1px solid rgba(239, 68, 68, 0.45);
+    color: #fecaca;
+  }
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="setup-wrap">
-  <div class="setup-card">
+<div class="settings-shell">
+  <div class="settings-card">
     <h2>Settings</h2>
 
     <label>Display Name</label>
@@ -26,7 +109,7 @@
     <label>Default Model</label>
     <select id="defaultModel" class="input">
       {% for model in models %}
-        <option value="{{ model }}" {% if selected_model == model %}selected{% endif %}>{{ model }} {{ model_metadata.get(model, {}).get('badge', '') }}</option>
+      <option value="{{ model }}" {% if selected_model == model %}selected{% endif %}>{{ model }} {{ model_metadata.get(model, {}).get('badge', '') }}</option>
       {% endfor %}
       <option value="auto" {% if selected_model == 'auto' %}selected{% endif %}>auto</option>
     </select>
@@ -36,23 +119,21 @@
 
     <div class="setup-actions">
       <a class="btn-secondary" href="{{ url_for('dashboard.setup_page') }}">Open Setup Wizard</a>
-      <button id="saveBtn" class="btn-primary" type="button">Save Settings</button>
+      <button id="saveBtn" class="settings-save" type="button">Save Settings</button>
     </div>
-    <p id="setupStatus" class="setup-status"></p>
+    <p id="setupStatus" class="settings-status"></p>
   </div>
 </div>
-<div id="saveToast" class="save-toast" style="display:none;">✅ Settings saved</div>
 {% endblock %}
+
 {% block scripts %}
 <script>
 (function () {
-  function showToast(message) {
-    const toast = document.getElementById('saveToast');
-    toast.textContent = message;
-    toast.style.display = 'block';
-    setTimeout(function () {
-      toast.style.display = 'none';
-    }, 2400);
+  const statusEl = document.getElementById('setupStatus');
+
+  function setStatus(ok, message) {
+    statusEl.className = 'settings-status ' + (ok ? 'ok' : 'err');
+    statusEl.textContent = (ok ? '✅ ' : '❌ ') + (message || '');
   }
 
   document.getElementById('saveBtn').addEventListener('click', async function () {
@@ -67,12 +148,11 @@
     };
     const resp = await fetch('/api/settings/save', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
     const data = await resp.json();
-    document.getElementById('setupStatus').textContent = (data.ok ? '✅ ' : '❌ ') + data.message;
-    if (data.ok) showToast('✅ Settings saved');
+    setStatus(!!data.ok, data.message || 'Settings updated');
   });
 })();
 </script>

@@ -1,3 +1,97 @@
 {% extends "base.html" %}
 {% block title %}Driver Converter{% endblock %}
-{% block content %}<div class="placeholder-panel">Driver Converter module will be implemented in Phase 4.</div>{% endblock %}
+
+{% block head %}
+<style>
+  .converter-shell {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    gap: 12px;
+    min-height: calc(100vh - 130px);
+  }
+
+  .converter-step-indicator {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr auto 1fr;
+    gap: 8px;
+    align-items: center;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .conv-step {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .conv-step.active { color: #cfe1ff; }
+
+  .conv-dot {
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    border: 1px solid var(--glass-border);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .conv-step.active .conv-dot {
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+    background: rgba(59, 130, 246, 0.2);
+  }
+
+  .conv-line {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.15);
+  }
+
+  .converter-onboarding {
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    background: var(--gradient-card);
+    padding: 24px;
+    display: grid;
+    gap: 10px;
+    place-items: center;
+    text-align: center;
+  }
+
+  .converter-drop {
+    width: min(640px, 100%);
+    border: 1px dashed rgba(59, 130, 246, 0.55);
+    border-radius: 12px;
+    padding: 24px;
+    background: rgba(59, 130, 246, 0.08);
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="converter-shell">
+  <div class="converter-step-indicator">
+    <div class="conv-step active"><span class="conv-dot">1</span><span>Upload Driver</span></div>
+    <span class="conv-line"></span>
+    <div class="conv-step"><span class="conv-dot">2</span><span>Convert</span></div>
+    <span class="conv-line"></span>
+    <div class="conv-step"><span class="conv-dot">3</span><span>Download</span></div>
+  </div>
+
+  <div class="converter-onboarding">
+    <h3>🔄 Driver Converter</h3>
+    <p>Upload an existing driver source file and convert between supported formats with guided AI assistance.</p>
+    <div class="converter-drop">
+      Drop driver source files here or click browse to start conversion workflow.
+    </div>
+    <button class="btn-secondary" type="button">📂 Browse Driver File</button>
+  </div>
+</div>
+{% endblock %}
