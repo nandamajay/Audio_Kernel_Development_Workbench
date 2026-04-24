@@ -1,0 +1,82 @@
+{
+  "project": "AKDW Audio Kernel Driver Workbench",
+  "owner": "nandam@qti.qualcomm.com",
+  "current_phase": 3,
+  "phases": [
+    {
+      "id": 1,
+      "name": "Foundation",
+      "status": "COMPLETE",
+      "tasks": []
+    },
+    {
+      "id": 2,
+      "name": "Functional Migration",
+      "status": "COMPLETE",
+      "tasks": []
+    },
+    {
+      "id": 3,
+      "name": "Terminal-IDE + Agent Mode + Glassmorphism",
+      "status": "IN_PROGRESS",
+      "tasks": [
+        {
+          "id": "3.1",
+          "name": "xterm.js Terminal Integration",
+          "status": "PENDING",
+          "assigned_to": "Designer",
+          "description": "Replace Monaco with full xterm.js terminal",
+          "acceptance_criteria": [
+            "bash shell works in browser",
+            "qgenie agent command launches agent mode",
+            "multi-tab support",
+            "MobaXterm-style layout"
+          ]
+        },
+        {
+          "id": "3.2",
+          "name": "Token Chunking / Summarization",
+          "status": "PENDING",
+          "assigned_to": "Designer",
+          "description": "Fix 4.2M token overflow crash"
+        },
+        {
+          "id": "3.3",
+          "name": "Glassmorphism UI Overhaul",
+          "status": "PENDING",
+          "assigned_to": "Designer",
+          "description": "Apply glassmorphism design tokens to all pages"
+        },
+        {
+          "id": "3.4",
+          "name": "SMTP Email Relay",
+          "status": "PENDING",
+          "assigned_to": "Designer",
+          "description": "Automated email delivery to nandam@qti.qualcomm.com"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Upstream Patch Tracker + Dual Agent",
+      "status": "PLANNED",
+      "tasks": [
+        {
+          "id": "4.1",
+          "name": "Upstream Patch Monitor",
+          "status": "PENDING",
+          "description": "lore.kernel.org + LKML deep-linking"
+        },
+        {
+          "id": "4.2",
+          "name": "Dual Agent Production Deployment",
+          "status": "PENDING",
+          "description": "Deploy Designer+Architect pipeline to production"
+        }
+      ]
+    }
+  ],
+  "enhancement_backlog": [],
+  "human_review_queue": [],
+  "completed_tasks": []
+}

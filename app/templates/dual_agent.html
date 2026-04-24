@@ -1,0 +1,248 @@
+{% extends "base.html" %}
+{% block title %}Dual Agent Workshop{% endblock %}
+
+{% block head %}
+<style>
+  .dual-shell { display: grid; grid-template-rows: auto 1fr auto; gap: 12px; min-height: calc(100vh - 130px); }
+  .dual-header { display:flex; justify-content:space-between; align-items:center; gap:12px; background:var(--gradient-card); border:1px solid var(--glass-border); border-radius:var(--radius-card); padding:16px; }
+  .dual-header h2 { margin:0; }
+  .dual-sub { color:var(--text-muted); font-size:13px; margin-top:2px; }
+  .status-pill { border:1px solid var(--glass-border); border-radius:999px; padding:5px 10px; font-size:12px; background:var(--glass-bg); }
+  .status-pill.RUNNING { color:var(--accent-blue); border-color:rgba(59,130,246,.45); }
+  .status-pill.COMPLETE { color:var(--accent-green); border-color:rgba(16,185,129,.45); }
+  .status-pill.PAUSED { color:var(--accent-red); border-color:rgba(239,68,68,.45); }
+  .dual-grid { display:flex; gap:12px; min-height:0; }
+  .dual-left,.dual-center,.dual-right { min-height:0; overflow:auto; border:1px solid var(--glass-border); border-radius:var(--radius-card); background:var(--glass-bg); padding:12px; }
+  .dual-left { width:30%; flex:none; }
+  .dual-center { width:45%; flex:none; }
+  .dual-right { flex:1 1 auto; }
+  .phase-card { border:1px solid var(--glass-border); border-radius:12px; background:rgba(255,255,255,.02); padding:10px; margin-bottom:10px; }
+  .phase-head { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .phase-badge { border:1px solid var(--glass-border); border-radius:999px; padding:2px 8px; font-size:11px; color:var(--text-muted); }
+  .phase-badge.IN_PROGRESS { color:var(--accent-blue); border-color:rgba(59,130,246,.45); }
+  .phase-badge.COMPLETE { color:var(--accent-green); border-color:rgba(16,185,129,.45); }
+  .phase-badge.PLANNED { color:var(--accent-orange); border-color:rgba(245,158,11,.45); }
+  .task-item { padding:8px; border:1px solid rgba(255,255,255,.05); border-radius:8px; margin-top:6px; font-size:12px; }
+  .task-item.current-task { border-color:var(--accent-blue); box-shadow:var(--shadow-glow); background:var(--gradient-card); }
+  .round-badge { display:inline-flex; border:1px solid var(--glass-border); border-radius:999px; padding:3px 9px; font-size:12px; margin-bottom:8px; }
+  .stream-feed { display:grid; gap:8px; }
+  .msg { max-width:88%; border:1px solid var(--glass-border); border-radius:12px; padding:8px 10px; white-space:pre-wrap; word-break:break-word; font-size:12px; }
+  .msg.designer { margin-left:auto; background:rgba(59,130,246,.16); }
+  .msg.reviewer { margin-right:auto; background:rgba(139,92,246,.16); }
+  .msg.parallel { margin-right:auto; background:rgba(245,158,11,.18); }
+  .msg.orchestrator { margin-right:auto; background:rgba(148,163,184,.16); }
+  .worked-divider { text-align:center; font-size:11px; color:var(--text-muted); border-top:1px dashed var(--glass-border); padding-top:6px; margin-top:4px; }
+  .alert-human { border:1px solid rgba(239,68,68,.45); background:rgba(239,68,68,.12); border-radius:10px; padding:10px; color:#fecaca; }
+  .intel-card { border:1px solid var(--glass-border); border-radius:10px; padding:10px; background:rgba(255,255,255,.02); margin-bottom:8px; }
+  .effort { border-radius:999px; border:1px solid var(--glass-border); font-size:10px; padding:2px 6px; }
+  .statusbar { border:1px solid var(--glass-border); border-radius:12px; background:rgba(255,255,255,.03); padding:8px 12px; display:flex; justify-content:space-between; gap:8px; font-size:12px; color:var(--text-muted); }
+  @media (max-width: 1200px) { .dual-grid { flex-direction:column; } .dual-left,.dual-center,.dual-right { width:100%; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dual-shell">
+  <div class="dual-header">
+    <div>
+      <h2>🤖 Dual Agent Workshop</h2>
+      <div class="dual-sub">Designer ↔ Senior Architect — Autonomous A2A Pipeline</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span id="runStatusPill" class="status-pill IDLE">IDLE</span>
+      <button id="startRunBtn" class="btn-primary" type="button">▶ Start Agent Run</button>
+    </div>
+  </div>
+
+  <div class="dual-grid">
+    <section class="dual-left">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="margin:0;">Project Plan</h3>
+        <span id="enhCount" class="phase-badge">Enh: 0</span>
+      </div>
+      <div id="planAccordion"></div>
+    </section>
+
+    <section class="dual-center">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="margin:0;">Live Agent Stream</h3>
+        <span id="roundBadge" class="round-badge">Round 0/5</span>
+      </div>
+      <div id="humanAlert"></div>
+      <div id="streamFeed" class="stream-feed"></div>
+    </section>
+
+    <aside class="dual-right">
+      <h3 style="margin-top:0;">Architect Intel</h3>
+      <div class="intel-card">
+        <strong>Enhancement Backlog</strong>
+        <div id="enhBacklog"></div>
+      </div>
+      <div class="intel-card">
+        <strong>Human Review Queue</strong>
+        <div id="humanQueue"></div>
+      </div>
+      <div class="intel-card">
+        <strong>Email Log</strong>
+        <div id="emailLog"></div>
+      </div>
+      <div class="intel-card">
+        <strong>Design Evolution Notes</strong>
+        <div id="designNote" class="small-muted">No notes yet.</div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="statusbar">
+    <span id="sbModel">Model: claude-sonnet-4</span>
+    <span id="sbRound">Round 0/5</span>
+    <span id="sbSession">Session: -</span>
+    <span id="sbEmail">Last email: -</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function(){
+  let sessionId = null;
+  let pollTimer = null;
+  let currentTaskId = null;
+
+  function setStatus(status){
+    const pill=document.getElementById('runStatusPill');
+    const map={running:'RUNNING',complete:'COMPLETE',paused:'PAUSED'};
+    const txt=map[String(status||'').toLowerCase()] || 'IDLE';
+    pill.textContent=txt;
+    pill.className='status-pill '+txt;
+  }
+
+  function renderPlan(plan){
+    if(!plan) return;
+    document.getElementById('enhCount').textContent = 'Enh: ' + (plan.enhancement_backlog||[]).length;
+    const wrap=document.getElementById('planAccordion');
+    wrap.innerHTML='';
+    const current = currentTaskId;
+    (plan.phases||[]).forEach(ph=>{
+      const card=document.createElement('div');
+      card.className='phase-card';
+      const tasks=(ph.tasks||[]).map(t=>{
+        const cls='task-item'+((current && t.id===current)?' current-task':'');
+        return '<div class="'+cls+'">'+t.id+' · '+t.name+' <span class="small-muted">['+t.status+']</span></div>';
+      }).join('');
+      card.innerHTML='<div class="phase-head"><strong>Phase '+ph.id+': '+ph.name+'</strong><span class="phase-badge '+ph.status+'">'+ph.status+'</span></div>'+tasks;
+      wrap.appendChild(card);
+    });
+
+    const enh=(plan.enhancement_backlog||[]);
+    document.getElementById('enhBacklog').innerHTML = enh.length ? enh.slice(-6).reverse().map(e=>
+      '<div style="margin-top:8px;border:1px solid var(--glass-border);border-radius:8px;padding:8px;">'
+      +'<div><strong>'+ (e.title||'Enhancement') +'</strong> <span class="effort">'+(e.effort||'M')+'</span></div>'
+      +'<div class="small-muted">'+(e.rationale||'')+'</div></div>'
+    ).join('') : '<div class="small-muted">No enhancements yet.</div>';
+
+    const hq=(plan.human_review_queue||[]);
+    document.getElementById('humanQueue').innerHTML = hq.length ? hq.slice(-6).reverse().map(i=>
+      '<div style="margin-top:8px;border:1px solid rgba(239,68,68,.35);border-radius:8px;padding:8px;">'
+      +'<div><strong>Task '+(i.task_id||'?')+'</strong></div><div class="small-muted">'+(i.reason||'Awaiting human review')+'</div></div>'
+    ).join('') : '<div class="small-muted">Queue empty.</div>';
+  }
+
+  function roleClass(role){
+    const r=String(role||'').toLowerCase();
+    if(r.includes('designer')) return ['designer','✏️ Designer'];
+    if(r.includes('review')) return ['reviewer','🏛️ Architect'];
+    if(r.includes('parallel')) return ['parallel','⚡ Parallel Think'];
+    return ['orchestrator','⚙️ Orchestrator'];
+  }
+
+  function renderStream(history){
+    const feed=document.getElementById('streamFeed');
+    feed.innerHTML='';
+    let lastRound = null;
+    (history||[]).forEach(h=>{
+      if(lastRound !== null && h.round_num !== lastRound){
+        const div=document.createElement('div');
+        div.className='worked-divider';
+        div.textContent='Worked for 0m 2s';
+        feed.appendChild(div);
+      }
+      lastRound = h.round_num;
+      const [cls,pfx]=roleClass(h.role);
+      const m=document.createElement('div');
+      m.className='msg '+cls;
+      m.textContent=pfx+': '+(h.content||'');
+      feed.appendChild(m);
+    });
+    feed.scrollTop = feed.scrollHeight;
+  }
+
+  function renderEmailLog(rows){
+    rows=rows||[];
+    document.getElementById('emailLog').innerHTML = rows.length ? rows.map(r=>
+      '<div style="margin-top:6px;"><span class="small-muted">'+(r.timestamp||'')+'</span><br>'+ (r.email_type||'TASK_SUMMARY') +'</div>'
+    ).join('') : '<div class="small-muted">No emails logged.</div>';
+    const last=rows[0];
+    document.getElementById('sbEmail').textContent = 'Last email: '+(last ? (last.email_type+' @ '+(last.timestamp||'')) : '-');
+  }
+
+  async function pollStatus(){
+    if(!sessionId) return;
+    const r=await fetch('/api/dual-agent/status/'+encodeURIComponent(sessionId));
+    if(!r.ok) return;
+    const d=await r.json();
+    setStatus(d.status||'running');
+    currentTaskId = d.task_id || currentTaskId;
+    renderStream(d.history||[]);
+    renderPlan(d.plan||{});
+    renderEmailLog(d.email_log||[]);
+    document.getElementById('sbSession').textContent='Session: '+sessionId;
+    document.getElementById('roundBadge').textContent='Round '+(d.round||0)+'/5';
+    document.getElementById('sbRound').textContent='Round '+(d.round||0)+'/5';
+    const alert=document.getElementById('humanAlert');
+    if(String(d.verdict||'').toUpperCase()==='HUMAN_REVIEW_REQUIRED' || String(d.status||'').toLowerCase()==='paused'){
+      alert.innerHTML='<div class="alert-human">Human Review REQUIRED. <button class="btn-secondary" id="approveBtn" type="button">Approve</button></div>';
+      const btn=document.getElementById('approveBtn');
+      if(btn){
+        btn.onclick=async()=>{
+          if(!currentTaskId) return;
+          await fetch('/api/dual-agent/approve/'+encodeURIComponent(currentTaskId), {method:'POST'});
+          await refreshPlanOnly();
+        };
+      }
+    } else {
+      alert.innerHTML='';
+    }
+
+    if(String(d.status).toLowerCase()==='complete' || String(d.status).toLowerCase()==='paused'){
+      clearInterval(pollTimer);
+      pollTimer=null;
+    }
+  }
+
+  async function refreshPlanOnly(){
+    const r=await fetch('/api/dual-agent/plan');
+    if(!r.ok) return;
+    const p=await r.json();
+    renderPlan(p);
+  }
+
+  document.getElementById('startRunBtn').addEventListener('click', async function(){
+    const r=await fetch('/api/dual-agent/start', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    const d=await r.json();
+    if(!r.ok){
+      alert(d.error || 'Failed to start');
+      return;
+    }
+    sessionId=d.session_id;
+    setStatus('running');
+    currentTaskId = null;
+    document.getElementById('sbSession').textContent='Session: '+sessionId;
+    if(pollTimer) clearInterval(pollTimer);
+    await pollStatus();
+    pollTimer=setInterval(pollStatus, 1500);
+  });
+
+  refreshPlanOnly();
+})();
+</script>
+{% endblock %}

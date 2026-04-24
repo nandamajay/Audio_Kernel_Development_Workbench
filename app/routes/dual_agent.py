@@ -1,0 +1,158 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+import threading
+import uuid
+from datetime import datetime
+
+from flask import Blueprint, jsonify, render_template, request
+
+from app.agents.dual_agent_orchestrator import DB_PATH, create_orchestrator
+from app.agents.email_notifier import EmailNotifier
+from app.agents.project_plan_manager import ProjectPlanManager
+
+bp = Blueprint("dual_agent", __name__)
+_sessions = {}
+
+
+def _db_write(session_id: str, task_id: str, status: str, verdict: str | None = None):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO dual_agent_sessions
+        (session_id, task_id, status, started_at)
+        VALUES (?,?,?,?)
+        """,
+        (session_id, task_id, status, datetime.utcnow().isoformat()),
+    )
+    if verdict is not None or status in ("complete", "paused"):
+        conn.execute(
+            """
+            UPDATE dual_agent_sessions
+            SET status=?, completed_at=?, final_verdict=COALESCE(?, final_verdict)
+            WHERE session_id=?
+            """,
+            (status, datetime.utcnow().isoformat(), verdict, session_id),
+        )
+    conn.commit()
+    conn.close()
+
+
+def _insert_history(session_id: str, round_num: int, role: str, content: str):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        """
+        INSERT INTO dual_agent_history
+          (session_id, round_num, role, content, timestamp)
+        VALUES (?,?,?,?,?)
+        """,
+        (session_id, round_num, role, content, datetime.utcnow().isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _read_history(session_id: str, limit: int = 100):
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        """
+        SELECT round_num, role, content, timestamp
+        FROM dual_agent_history
+        WHERE session_id=?
+        ORDER BY id ASC
+        LIMIT ?
+        """,
+        (session_id, limit),
+    ).fetchall()
+    conn.close()
+    return [
+        {
+            "round_num": r[0],
+            "role": r[1],
+            "content": r[2],
+            "timestamp": r[3],
+        }
+        for r in rows
+    ]
+
+
+@bp.route("/dual-agent/", methods=["GET"])
+def index():
+    plan = ProjectPlanManager().load()
+    return render_template("dual_agent.html", plan=plan)
+
+
+@bp.route("/api/dual-agent/start", methods=["POST"])
+def start():
+    plan_mgr = ProjectPlanManager()
+    task, _ = plan_mgr.get_next_pending_task()
+    if not task:
+        return jsonify({"error": "No pending tasks in plan"}), 400
+    sid = f"da-{uuid.uuid4().hex[:8]}"
+    graph, on_finish = create_orchestrator()
+    init_state = {
+        "task_description": task["description"],
+        "current_task_id": task["id"],
+        "designer_output": None,
+        "parallel_think_result": None,
+        "review_result": None,
+        "round_num": 0,
+        "verdict": None,
+        "session_id": sid,
+        "history": [],
+    }
+
+    _sessions[sid] = {
+        "status": "running",
+        "task": task["name"],
+        "task_id": task["id"],
+        "round": 0,
+        "verdict": None,
+        "started_at": datetime.utcnow().isoformat(),
+    }
+    _db_write(sid, task["id"], "running")
+    _insert_history(sid, 0, "orchestrator", f"Session started for task {task['id']} - {task['name']}")
+
+    def _run():
+        final = graph.invoke(init_state)
+        on_finish(final)
+        verdict = final.get("verdict", "")
+        status = "paused" if verdict == "HUMAN_REVIEW_REQUIRED" else "complete"
+        _sessions[sid]["status"] = status
+        _sessions[sid]["verdict"] = verdict
+        _sessions[sid]["round"] = final.get("round_num", 0)
+        _sessions[sid]["completed_at"] = datetime.utcnow().isoformat()
+        _db_write(sid, _sessions[sid]["task_id"], status, verdict=verdict)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"session_id": sid, "task": task["name"]})
+
+
+@bp.route("/api/dual-agent/status/<sid>")
+def status(sid):
+    row = _sessions.get(sid)
+    if not row:
+        return jsonify({"error": "not found"}), 404
+    plan = ProjectPlanManager().load()
+    return jsonify(
+        {
+            **row,
+            "session_id": sid,
+            "history": _read_history(sid),
+            "plan": plan,
+            "email_log": EmailNotifier().get_recent_logs(5),
+        }
+    )
+
+
+@bp.route("/api/dual-agent/plan")
+def get_plan():
+    return jsonify(ProjectPlanManager().load())
+
+
+@bp.route("/api/dual-agent/approve/<task_id>", methods=["POST"])
+def human_approve(task_id):
+    """Human-in-the-loop: Ajay approves after manual review."""
+    ProjectPlanManager().mark_task_complete(task_id)
+    return jsonify({"status": "approved", "task_id": task_id})

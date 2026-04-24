@@ -10,6 +10,7 @@ from flask_migrate import Migrate
 from flask_socketio import SocketIO
 
 from app.config import Config, is_first_run
+from app.db import ensure_dual_agent_tables
 from app.models import db
 from app.routes import ALL_BLUEPRINTS
 from app.services.agent_service import AgentService
@@ -60,6 +61,7 @@ def create_app(config_class=Config):
 
     with app.app_context():
         db.create_all()
+    ensure_dual_agent_tables()
 
     return app
 

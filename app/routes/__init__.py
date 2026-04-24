@@ -10,6 +10,7 @@ from app.routes.patchwise import patchwise_bp
 from app.routes.triage import triage_bp
 from app.routes.upstream import upstream_bp
 from app.routes.terminal_routes import terminal_bp
+from app.routes.dual_agent import bp as dual_agent_bp
 
 
 ALL_BLUEPRINTS = [
@@ -23,4 +24,5 @@ ALL_BLUEPRINTS = [
     triage_bp,
     agent_bp,
     terminal_bp,
+    dual_agent_bp,
 ]
