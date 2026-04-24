@@ -44,3 +44,13 @@ Generated: 2026-04-24
   - GET /converter/ -> 200
   - GET /triage/ -> 200
 - Notes: Applied token-consistent topbar/sidebar theme, settings glass card redesign, converter guided onboarding shell, editor assistant markdown-link rendering, and global scrollbar styling.
+
+## Section 6 — Regression Test Suite
+- Status: PASS
+- HEALTH: PASS (200)
+- SETTINGS_SAVE: PASS
+- PATCHWISE_REVIEW: PASS (findings returned)
+- PATCHWISE_CHECKPATCH: PASS
+- EVIDENCE_LIST: PASS
+- AGENT_CHAT: PASS (non-empty response; no 401)
+- PAGE_ROUTES: PASS (/, /patchwise/, /editor/, /triage/, /converter/, /agent/, /settings/ all 200)
