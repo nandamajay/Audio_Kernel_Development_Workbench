@@ -54,3 +54,8 @@ Generated: 2026-04-24
 - EVIDENCE_LIST: PASS
 - AGENT_CHAT: PASS (non-empty response; no 401)
 - PAGE_ROUTES: PASS (/, /patchwise/, /editor/, /triage/, /converter/, /agent/, /settings/ all 200)
+
+## Section 7 — Report + Email Delivery
+- Status: PASS
+- Report generated: `/local/mnt/workspace/AKDW/daytime_report_v5.html`
+- Email delivery: PASS (`localhost:25` relay)
