@@ -12,7 +12,7 @@
 
   .triage-step-indicator {
     display: grid;
-    grid-template-columns: 1fr auto 1fr auto 1fr;
+    grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr;
     gap: 8px;
     align-items: center;
     border: 1px solid var(--glass-border);
@@ -59,7 +59,7 @@
 
   .triage-grid {
     display: grid;
-    grid-template-columns: 1fr 420px;
+    grid-template-columns: 1fr 430px;
     gap: 12px;
     min-height: 0;
   }
@@ -74,7 +74,7 @@
     overflow: auto;
   }
 
-  .triage-onboarding {
+  .triage-hero {
     border: 1px solid rgba(59, 130, 246, 0.3);
     border-radius: 12px;
     background: var(--gradient-card);
@@ -83,42 +83,94 @@
     gap: 10px;
   }
 
-  .crash-input {
-    width: 100%;
-    min-height: 220px;
-    border-radius: 10px;
+  .triage-hero-icon {
+    font-size: 1.8rem;
+  }
+
+  .sample-buttons {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .sample-buttons button {
     border: 1px solid var(--glass-border);
-    background: #0a0e1a;
-    color: #10b981;
-    font-family: "IBM Plex Mono", monospace;
-    padding: 12px;
-    resize: vertical;
+    border-radius: var(--radius-btn);
+    background: rgba(255,255,255,0.05);
+    color: var(--text-primary);
+    padding: 7px 10px;
+    cursor: pointer;
   }
 
-  .crash-input.dragging {
+  .sample-buttons button:hover {
     border-color: var(--accent-blue);
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+    box-shadow: var(--shadow-glow);
   }
 
-  .triage-actions {
+  .crash-input-wrapper {
+    margin-top: 12px;
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    background: rgba(10, 14, 26, 0.9);
+    overflow: hidden;
+  }
+
+  .crash-input-header {
     display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--glass-border);
+    font-size: 13px;
+    color: #c8d8ef;
   }
 
-  .sample-inputs {
+  .crash-hint {
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .clear-btn {
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    background: rgba(255,255,255,0.05);
+    color: var(--text-primary);
+    cursor: pointer;
+    padding: 5px 8px;
+  }
+
+  #crash-input {
+    width: 100%;
+    min-height: 290px;
+    border: none;
+    outline: none;
+    resize: vertical;
+    background: #090f1d;
+    color: #9cf1d4;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    line-height: 1.45;
+    padding: 12px;
+  }
+
+  #crash-input.drag-over {
+    box-shadow: inset 0 0 0 2px rgba(59,130,246,0.5);
+  }
+
+  .crash-input-footer {
     display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    border-top: 1px solid var(--glass-border);
+    padding: 10px 12px;
   }
 
-  .triage-placeholder {
+  .results-placeholder {
     border: 1px dashed var(--glass-border);
     border-radius: 12px;
     padding: 14px;
     color: var(--text-muted);
-    display: grid;
-    gap: 8px;
   }
 
   .triage-card {
@@ -134,9 +186,44 @@
     font-size: 13px;
   }
 
+  .severity-pill {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 3px 9px;
+    border: 1px solid var(--glass-border);
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .severity-pill.high {
+    background: rgba(239,68,68,0.15);
+    border-color: rgba(239,68,68,0.35);
+    color: #fecaca;
+  }
+
+  .severity-pill.medium {
+    background: rgba(245,158,11,0.16);
+    border-color: rgba(245,158,11,0.35);
+    color: #fed7aa;
+  }
+
+  .severity-pill.low {
+    background: rgba(59,130,246,0.15);
+    border-color: rgba(59,130,246,0.35);
+    color: #bfdbfe;
+  }
+
   @media (max-width: 1200px) {
     .triage-grid {
       grid-template-columns: 1fr;
+    }
+    .triage-step-indicator {
+      grid-template-columns: 1fr;
+      gap: 6px;
+    }
+    .triage-step-line {
+      display: none;
     }
   }
 </style>
@@ -144,53 +231,52 @@
 
 {% block content %}
 <div class="triage-shell">
-  <div class="editor-toolbar-row">
-    <div class="path-switcher">
-      <input id="triagePathInput" class="input" value="/app/kernel">
-      <button id="triageBrowseBtn" class="btn-secondary" type="button">📂 Browse</button>
-      <button id="triageApplyBtn" class="btn-primary" type="button">Apply</button>
-    </div>
-    <div id="triagePathListing" class="small-muted">Active path: /app/kernel</div>
-  </div>
-
   <div class="triage-step-indicator">
     <div id="triageStep1" class="triage-step active"><span class="triage-step-dot">1</span><span>Input Log</span></div>
     <span class="triage-step-line"></span>
-    <div id="triageStep2" class="triage-step"><span class="triage-step-dot">2</span><span>Analyze</span></div>
+    <div id="triageStep2" class="triage-step"><span class="triage-step-dot">2</span><span>Run Analysis</span></div>
     <span class="triage-step-line"></span>
     <div id="triageStep3" class="triage-step"><span class="triage-step-dot">3</span><span>Review Findings</span></div>
+    <span class="triage-step-line"></span>
+    <div id="triageStep4" class="triage-step"><span class="triage-step-dot">4</span><span>File Bug / Fix</span></div>
   </div>
 
   <div class="triage-grid">
     <section class="triage-main">
-      <div class="triage-onboarding">
-        <h3>🩺 Kernel Issue Triage</h3>
-        <p>Paste a crash dump, oops, dmesg log, or kernel panic output and QGenie will identify root cause, suggest fixes, and link likely related commits.</p>
-        <textarea id="crashInput" class="crash-input" placeholder="[ 1234.567890] BUG: unable to handle kernel NULL pointer
-[ 1234.567891] IP: snd_soc_component_read+0x4c/0x80
-
-Paste crash log / oops / dmesg here...
-(or drag & drop a .log / .txt file below)"></textarea>
-        <div class="triage-actions">
-          <input id="triageFileInput" type="file" accept=".log,.txt" style="display:none">
-          <button id="uploadLogBtn" class="btn-secondary" type="button">📂 Upload Log File</button>
-          <button id="startTriageBtn" class="btn-primary" type="button">▶ Start Triage</button>
+      <div class="triage-hero">
+        <div class="triage-hero-icon">🩺</div>
+        <h2>Kernel Triage Assistant</h2>
+        <p>Paste your crash log, kernel oops, dmesg output, or BUG() trace below. QGenie will identify the root cause, affected subsystem, and suggested fix.</p>
+        <div class="sample-buttons">
+          <button type="button" onclick="loadSample('oops')">📋 Load Sample: NULL Pointer Oops</button>
+          <button type="button" onclick="loadSample('audio')">📋 Load Sample: Audio DAPM Error</button>
+          <button type="button" onclick="loadSample('lockdep')">📋 Load Sample: Lockdep Warning</button>
         </div>
-        <div class="small-muted">-- OR use example inputs --</div>
-        <div class="sample-inputs">
-          <button id="samplePanicBtn" class="btn-secondary" type="button">💥 Kernel Panic</button>
-          <button id="sampleAudioBtn" class="btn-secondary" type="button">📋 Audio Oops</button>
-          <button id="sampleLockBtn" class="btn-secondary" type="button">🔒 Lock Warning</button>
+      </div>
+
+      <div class="crash-input-wrapper">
+        <div class="crash-input-header">
+          <span>📄 Paste Kernel Log / Crash Dump</span>
+          <span class="crash-hint">or drag & drop a .log / .txt file</span>
+          <button class="clear-btn" type="button" onclick="clearCrash()">🗑 Clear</button>
+        </div>
+        <textarea id="crash-input" placeholder="[  123.456789] BUG: kernel NULL pointer dereference...
+[ 123.456790] RIP: 0010:snd_soc_dapm_power_widgets+0x1a4/0x3f0
+...
+Paste your full dmesg / oops / BUG() output here" spellcheck="false"></textarea>
+        <div class="crash-input-footer">
+          <span id="crash-line-count" class="small-muted">0 lines</span>
+          <button class="btn-primary" id="btn-triage" type="button" onclick="runTriage()">🩺 Run Triage Analysis</button>
         </div>
       </div>
     </section>
 
     <aside class="triage-results">
       <h3>🔍 Triage Results</h3>
-      <div id="triageResultsPlaceholder" class="triage-placeholder">
-        Results will appear here after you click <strong>Start Triage</strong>.
+      <div id="triage-results-placeholder" class="results-placeholder">
+        Structured findings will appear here after analysis.
       </div>
-      <div id="triageResults"></div>
+      <div id="triage-results"></div>
     </aside>
   </div>
 </div>
@@ -199,137 +285,117 @@ Paste crash log / oops / dmesg here...
 {% block scripts %}
 <script>
 (function () {
-  const key = "akdw_triage_path";
-  const sampleInputs = {
-    panic: "[ 420.777001] BUG: kernel NULL pointer dereference, address: 0000000000000008\\n[ 420.777102] IP: snd_soc_component_read+0x4c/0x80\\n[ 420.777214] Call Trace:\\n[ 420.777298]  qcom_lpass_hw_params+0x1d8/0x280\\n[ 420.777390]  snd_soc_dai_hw_params+0x10f/0x180",
-    audio: "[ 877.003002] Unable to handle kernel paging request at virtual address 0x0\\n[ 877.003104] pc : q6asm_run_nowait+0x90/0x1b0\\n[ 877.003205] lr : q6asm_open_write+0x60/0xb0\\n[ 877.003302] Call trace:\\n[ 877.003401]  q6routing_stream_open+0x118/0x170",
-    lock: "[ 111.225501] WARNING: possible circular locking dependency detected\\n[ 111.225690] CPU: 3 PID: 2786 Comm: alsa-sink\\n[ 111.225888] lockdep: q6afe_lock -> afe_port_lock\\n[ 111.226084] stack backtrace:\\n[ 111.226195]  dump_stack_lvl+0x54/0x8c",
+  const samples = {
+    oops: "[  123.456789] BUG: kernel NULL pointer dereference\n[ 123.456790] RIP: 0010:snd_soc_dapm_power_widgets+0x1a4/0x3f0\n[ 123.456792] Call Trace:\n[ 123.456793]  snd_soc_component_read+0x4c/0x80",
+    audio: "[  348.120111] ASoC: error at snd_soc_dapm_new_widgets on lpass-wcd\n[  348.120212] pc : q6asm_run_nowait+0x90/0x1b0\n[  348.120311] lr : q6asm_open_write+0x60/0xb0",
+    lockdep: "[  88.902013] WARNING: possible circular locking dependency detected\n[  88.902112] lockdep: q6afe_lock -> afe_port_lock\n[  88.902210] stack backtrace:\n[  88.902311]  dump_stack_lvl+0x54/0x8c"
   };
 
-  function setStep(state) {
-    const s1 = document.getElementById("triageStep1");
-    const s2 = document.getElementById("triageStep2");
-    const s3 = document.getElementById("triageStep3");
-    s1.className = "triage-step";
-    s2.className = "triage-step";
-    s3.className = "triage-step";
-    if (state === 1) { s1.classList.add("active"); return; }
-    if (state === 2) { s1.classList.add("completed"); s2.classList.add("active"); return; }
-    s1.classList.add("completed");
-    s2.classList.add("completed");
-    s3.classList.add("active");
+  function setStep(active) {
+    [1, 2, 3, 4].forEach((n) => {
+      const el = document.getElementById("triageStep" + n);
+      el.className = "triage-step";
+      if (n < active) {
+        el.classList.add("completed");
+      } else if (n === active) {
+        el.classList.add("active");
+      }
+    });
   }
 
-  async function refreshPath() {
-    const input = document.getElementById("triagePathInput");
-    const listing = document.getElementById("triagePathListing");
-    const path = input.value.trim() || "/app/kernel";
-    localStorage.setItem(key, path);
-    const resp = await fetch("/api/fs/browse?path=" + encodeURIComponent(path));
-    const data = await resp.json();
-    if (!data.ok) {
-      listing.textContent = data.error || "Path not allowed";
-      return;
-    }
-    input.value = data.path;
-    listing.textContent = "Active path: " + data.path + " (" + (data.entries || []).length + " entries)";
+  function updateLineCount() {
+    const text = document.getElementById("crash-input").value;
+    const count = text ? text.split(/\r?\n/).length : 0;
+    document.getElementById("crash-line-count").textContent = count + " lines";
   }
 
-  function renderResults(rawText) {
-    const root = document.getElementById("triageResults");
-    document.getElementById("triageResultsPlaceholder").style.display = "none";
-    root.innerHTML = "";
-    const text = String(rawText || "No response").trim();
-    const lines = text.split("\\n").filter(Boolean);
-    const rootCause = lines.slice(0, 3).join(" ");
-    const fix = lines.slice(3, 7).join(" ") || "Check pointer validity, probe ordering, and locking around ASoC component paths.";
+  window.loadSample = function (name) {
+    document.getElementById("crash-input").value = samples[name] || "";
+    updateLineCount();
+    setStep(1);
+  };
 
+  window.clearCrash = function () {
+    document.getElementById("crash-input").value = "";
+    updateLineCount();
+    setStep(1);
+  };
+
+  function renderResults(result) {
+    const root = document.getElementById("triage-results");
+    document.getElementById("triage-results-placeholder").style.display = "none";
     root.innerHTML = [
-      '<div class="triage-card"><h4>🔴 ROOT CAUSE</h4><div>' + rootCause + "</div></div>",
-      '<div class="triage-card"><h4>🔧 SUGGESTED FIX</h4><div>' + fix + "</div></div>",
-      '<div class="triage-card"><h4>📎 RELATED COMMITS</h4><div><a class=\"chat-link\" target=\"_blank\" rel=\"noopener\" href=\"https://lore.kernel.org/all/?q=ASoC+fix\">🔗 LKML search results</a></div></div>",
+      '<div class="triage-card"><h4>🔴 Root Cause</h4><div>' + (result.root_cause || "N/A") + '</div></div>',
+      '<div class="triage-card"><h4>📍 Location</h4><div>' + (result.location || "N/A") + '</div></div>',
+      '<div class="triage-card"><h4>🔧 Suggested Fix</h4><div>' + (result.suggested_fix || "N/A") + '</div></div>',
+      '<div class="triage-card"><h4>🏷 Subsystem</h4><div>' + (result.subsystem || "N/A") + '</div></div>',
+      '<div class="triage-card"><h4>👤 Maintainer</h4><div>' + (result.maintainer || "N/A") + '</div></div>',
+      '<div class="triage-card"><h4>Severity</h4><span class="severity-pill ' + (result.severity || "low") + '">' + ((result.severity || "low").toUpperCase()) + '</span></div>'
     ].join("");
   }
 
-  async function startTriage() {
-    const text = document.getElementById("crashInput").value.trim();
-    if (!text) return;
+  window.runTriage = async function () {
+    const btn = document.getElementById("btn-triage");
+    const text = document.getElementById("crash-input").value.trim();
+    if (!text) {
+      return;
+    }
+
     setStep(2);
-    const payload = {
-      session_id: "triage-" + Math.random().toString(36).slice(2, 10),
-      page: "triage",
-      message: "Analyze this kernel crash log and provide root cause, fix, and likely related commits:\\n\\n" + text,
-    };
-    const resp = await fetch("/api/agent/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const data = await resp.json();
-    renderResults(data.response || data.content || data.message || "");
-    setStep(3);
-  }
+    btn.disabled = true;
+    btn.textContent = "🩺 Analyzing...";
 
-  function wireDnD() {
-    const input = document.getElementById("crashInput");
-    ["dragenter", "dragover"].forEach(function (evt) {
-      input.addEventListener(evt, function (e) {
-        e.preventDefault();
-        input.classList.add("dragging");
+    try {
+      const resp = await fetch("/api/triage/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ crash_log: text })
       });
-    });
-    ["dragleave", "drop"].forEach(function (evt) {
-      input.addEventListener(evt, function (e) {
-        e.preventDefault();
-        input.classList.remove("dragging");
-      });
-    });
-    input.addEventListener("drop", function (e) {
-      const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = function () {
-        input.value = String(reader.result || "");
-        setStep(1);
-      };
-      reader.readAsText(file);
-    });
-  }
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data.error || "Triage failed");
+      }
+      setStep(3);
+      renderResults(data);
+      setStep(4);
+    } catch (err) {
+      document.getElementById("triage-results-placeholder").style.display = "block";
+      document.getElementById("triage-results-placeholder").textContent = "Analysis failed: " + err.message;
+      setStep(1);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "🩺 Run Triage Analysis";
+    }
+  };
 
-  document.getElementById("triagePathInput").value = localStorage.getItem(key) || "/app/kernel";
-  document.getElementById("triageBrowseBtn").addEventListener("click", refreshPath);
-  document.getElementById("triageApplyBtn").addEventListener("click", refreshPath);
-  document.getElementById("startTriageBtn").addEventListener("click", startTriage);
-  document.getElementById("uploadLogBtn").addEventListener("click", function () {
-    document.getElementById("triageFileInput").click();
+  const crashInput = document.getElementById("crash-input");
+  crashInput.addEventListener("input", updateLineCount);
+  crashInput.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    crashInput.classList.add("drag-over");
   });
-  document.getElementById("triageFileInput").addEventListener("change", function (e) {
-    const file = e.target.files && e.target.files[0];
-    if (!file) return;
+  crashInput.addEventListener("dragleave", (e) => {
+    e.preventDefault();
+    crashInput.classList.remove("drag-over");
+  });
+  crashInput.addEventListener("drop", (e) => {
+    e.preventDefault();
+    crashInput.classList.remove("drag-over");
+    const file = e.dataTransfer.files[0];
+    if (!file) {
+      return;
+    }
     const reader = new FileReader();
-    reader.onload = function () {
-      document.getElementById("crashInput").value = String(reader.result || "");
+    reader.onload = (ev) => {
+      crashInput.value = ev.target.result || "";
+      updateLineCount();
       setStep(1);
     };
     reader.readAsText(file);
-    e.target.value = "";
   });
 
-  document.getElementById("samplePanicBtn").addEventListener("click", function () {
-    document.getElementById("crashInput").value = sampleInputs.panic;
-    setStep(1);
-  });
-  document.getElementById("sampleAudioBtn").addEventListener("click", function () {
-    document.getElementById("crashInput").value = sampleInputs.audio;
-    setStep(1);
-  });
-  document.getElementById("sampleLockBtn").addEventListener("click", function () {
-    document.getElementById("crashInput").value = sampleInputs.lock;
-    setStep(1);
-  });
-
-  wireDnD();
-  refreshPath();
+  updateLineCount();
+  setStep(1);
 })();
 </script>
 {% endblock %}
