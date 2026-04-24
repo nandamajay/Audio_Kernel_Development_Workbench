@@ -16,3 +16,9 @@ Generated: 2026-04-24
 - Test: `curl -s http://localhost:5001/ | grep -c "stat-card|action-card|hero-banner"`
 - Result: `9` (>0)
 - Notes: Hero banner, premium stat cards, action cards, activity/patch health, tips strip, sidebar active state/version badge implemented.
+
+## Section 2 — Patchwise Guided Workflow UX
+- Status: PASS
+- Test: `curl -s http://localhost:5001/patchwise/ | grep -c "step-indicator|onboarding|btn-disabled|patch-context"`
+- Result: `11` (>0)
+- Notes: Added step indicator states, onboarding prompt, contextual action enable/disable flow, results placeholder, and messenger-style patch assistant with patch context injection.

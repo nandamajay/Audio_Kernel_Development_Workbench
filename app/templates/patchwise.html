@@ -5,16 +5,70 @@
 <style>
   .patchwise-shell {
     display: grid;
-    grid-template-rows: auto 1fr;
-    gap: 10px;
+    grid-template-rows: auto auto 1fr;
+    gap: 12px;
     height: calc(100vh - 130px);
     min-height: 0;
   }
 
+  .step-indicator {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr auto 1fr;
+    gap: 8px;
+    align-items: center;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .step-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .step-dot {
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--glass-border);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .step-item.active {
+    color: #cfe1ff;
+  }
+
+  .step-item.active .step-dot {
+    background: rgba(59, 130, 246, 0.2);
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+  }
+
+  .step-item.completed .step-dot {
+    background: rgba(16, 185, 129, 0.2);
+    border-color: var(--accent-green);
+    color: var(--accent-green);
+  }
+
+  .step-line {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.15);
+  }
+
   .patchwise-grid {
     display: grid;
-    grid-template-columns: 240px 1fr 420px;
-    gap: 10px;
+    grid-template-columns: 270px 1fr 430px;
+    gap: 12px;
     min-height: 0;
   }
 
@@ -23,11 +77,78 @@
   .patchwise-right {
     min-height: 0;
     overflow: auto;
-    padding: 10px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
   }
 
-  .patchwise-center textarea {
-    min-height: 520px;
+  .onboarding {
+    border: 1px dashed rgba(59, 130, 246, 0.5);
+    border-radius: 12px;
+    padding: 16px;
+    text-align: center;
+    display: grid;
+    gap: 8px;
+    margin-bottom: 10px;
+    background: rgba(59, 130, 246, 0.08);
+  }
+
+  .onboarding .icon {
+    font-size: 30px;
+  }
+
+  .file-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--glass-border);
+    border-radius: 999px;
+    padding: 5px 10px;
+    margin: 0 8px 8px 0;
+    background: rgba(255, 255, 255, 0.04);
+    font-size: 12px;
+  }
+
+  .context-hint {
+    display: none;
+    margin: 10px 0;
+    border: 1px solid rgba(16, 185, 129, 0.45);
+    border-radius: 10px;
+    padding: 10px;
+    background: rgba(16, 185, 129, 0.14);
+  }
+
+  .patch-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 8px 0 10px;
+  }
+
+  .btn-disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  .btn-enabled-pulse {
+    animation: pulse-btn 1.6s infinite;
+  }
+
+  @keyframes pulse-btn {
+    0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.35); }
+    70% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+  }
+
+  .result-placeholder {
+    border: 1px dashed var(--glass-border);
+    border-radius: 10px;
+    padding: 14px;
+    color: var(--text-muted);
+    display: grid;
+    gap: 10px;
   }
 
   .finding-card {
@@ -41,7 +162,7 @@
   .severity-badge {
     border-radius: 999px;
     font-size: 11px;
-    font-weight: 600;
+    font-weight: 700;
     padding: 2px 8px;
     display: inline-block;
   }
@@ -52,7 +173,7 @@
   .sev-info { background: #3fb950; color: #051109; }
 
   .loc-chip {
-    font-family: "JetBrains Mono", monospace;
+    font-family: "IBM Plex Mono", monospace;
     font-size: 11px;
     color: var(--text-muted);
     margin-left: 6px;
@@ -61,7 +182,7 @@
   .evidence-box {
     margin-top: 10px;
     background: var(--glass-bg);
-    border: 1px dashed rgba(88,166,255,0.3);
+    border: 1px dashed rgba(88, 166, 255, 0.3);
     border-radius: 10px;
     padding: 8px;
     display: grid;
@@ -76,25 +197,60 @@
   }
 
   .lkml-chip {
-    background: rgba(88,166,255,0.1);
+    background: rgba(88, 166, 255, 0.1);
     border: 1px solid var(--accent-blue);
     border-radius: 4px;
     padding: 4px 10px;
     font-size: 12px;
-  }
-
-  .pw-actions {
-    display: flex;
+    display: inline-flex;
+    align-items: center;
     gap: 8px;
-    flex-wrap: wrap;
+    margin: 4px 0;
   }
 
-  .assistant-panel {
-    margin-top: 10px;
-    border-top: 1px solid var(--border);
-    padding-top: 10px;
+  .patch-context {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+
+  .assistant-messages {
+    min-height: 140px;
+    max-height: 220px;
+    overflow: auto;
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    padding: 10px;
     display: grid;
     gap: 8px;
+    margin: 8px 0;
+  }
+
+  .assistant-bubble {
+    max-width: 90%;
+    border-radius: 14px;
+    padding: 8px 12px;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .assistant-bubble.user {
+    margin-left: auto;
+    background: linear-gradient(135deg, #1d4ed8 0%, #7c3aed 100%);
+    color: #fff;
+    border-radius: 14px 14px 4px 14px;
+  }
+
+  .assistant-bubble.ai {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--glass-border);
+    border-radius: 14px 14px 14px 4px;
+  }
+
+  .chat-link {
+    color: var(--accent-blue);
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
 
   @media (max-width: 1300px) {
@@ -114,11 +270,6 @@
       <button id="patchApplyBtn" class="btn-primary" type="button">Apply</button>
     </div>
     <div class="editor-meta">
-      <div class="pw-actions">
-        <button id="runReviewBtn" class="btn-primary" type="button">▶ Run AI Review</button>
-        <button id="runCheckpatchBtn" class="btn-secondary" type="button">Run Checkpatch</button>
-        <button id="exportBtn" class="btn-secondary" type="button">⬇ Export Report</button>
-      </div>
       <label>Model</label>
       <select id="patchModel" class="input small">
         {% for model in models %}
@@ -128,37 +279,63 @@
     </div>
   </div>
 
+  <div class="step-indicator">
+    <div id="stepUpload" class="step-item active"><span class="step-dot">1</span><span>Upload Patch</span></div>
+    <span class="step-line"></span>
+    <div id="stepReview" class="step-item"><span class="step-dot">2</span><span>Run Review</span></div>
+    <span class="step-line"></span>
+    <div id="stepResults" class="step-item"><span class="step-dot">3</span><span>View Results</span></div>
+  </div>
+
   <div class="patchwise-grid">
-    <aside class="panel patchwise-left">
+    <aside class="patchwise-left">
       <h3>Files</h3>
-      <button id="browse-btn" class="btn-secondary" type="button">Browse Files</button>
+      <div id="onboardingPrompt" class="onboarding">
+        <div class="icon">📂</div>
+        <div>Drop your patch file here</div>
+        <div class="small-muted">Supports: .patch .diff .c .h .dts .dtsi .log .txt</div>
+        <button id="browse-btn" class="btn-secondary" type="button">Browse Files</button>
+      </div>
       <input type="file" id="pw-file-input" accept=".c,.h,.dts,.dtsi,.patch,.log,.txt,.diff" multiple style="display:none">
-      <div id="patchDropZone" class="drop-zone" data-dnd-events="dragover dragleave drop">Drop patch/source/log files here</div>
-      <!-- dragover -->
-      <!-- dragleave -->
-      <!-- drop -->
+      <div id="patchDropZone" class="drop-zone">Drop patch/source/log files here</div>
       <div id="patchFileList" class="file-tree"></div>
     </aside>
 
-    <section class="panel patchwise-center">
+    <section class="patchwise-center">
       <h3>Patch Content</h3>
-      <label class="small-muted">Context URL (optional)</label>
-      <input id="contextUrl" class="input" placeholder="https://lore.kernel.org/...">
-      <textarea id="patchContent" class="input" style="font-family:'JetBrains Mono',monospace;"></textarea>
+      <div class="patch-context">Patch context and notes</div>
+      <label class="small-muted" title="Paste a link to the upstream LKML discussion, GitHub PR, or kernel commit for context">Context URL (optional)</label>
+      <input id="contextUrl" class="input" placeholder="🔗 Paste LKML thread URL for additional context (optional)">
+      <div class="patch-actions">
+        <button id="runReviewBtn" class="btn-primary btn-disabled" type="button" title="Load a patch file first">▶ Run AI Review</button>
+        <button id="runCheckpatchBtn" class="btn-secondary btn-disabled" type="button" title="Load a patch file first">⚙ Run Checkpatch</button>
+        <button id="exportBtn" class="btn-secondary btn-disabled" type="button" title="Load a patch file first">⬇ Export Report</button>
+      </div>
+      <div id="contextHint" class="context-hint">
+        ✅ File loaded! Now choose your action:
+        <button id="hintRunReviewBtn" class="btn-primary" type="button">▶ Run AI Review</button>
+        <button id="hintCheckpatchBtn" class="btn-secondary" type="button">⚙ Run Checkpatch</button>
+      </div>
+      <textarea id="patchContent" class="input" style="font-family:'IBM Plex Mono',monospace;min-height:480px;"></textarea>
       <div id="checkpatchOutput" class="small-muted"></div>
     </section>
 
-    <aside class="panel patchwise-right">
+    <aside class="patchwise-right">
       <h3>Review Results</h3>
       <div id="patchPathListing" class="small-muted">Active path: /app/kernel</div>
       <div id="reviewSummary" class="small-muted"></div>
+      <div id="reviewPlaceholder" class="result-placeholder">
+        <strong>🔍 Review Results</strong>
+        <span>Results will appear here after you click "Run AI Review".</span>
+        <button id="placeholderRunBtn" class="btn-primary" type="button">▶ Run AI Review</button>
+      </div>
       <div id="reviewFindings"></div>
 
       <div class="assistant-panel">
         <h4>QGenie Assistant</h4>
-        <textarea id="pwAskInput" class="input" rows="3" placeholder="Ask about this patch..."></textarea>
+        <div id="pwAskMessages" class="assistant-messages"></div>
+        <textarea id="pwAskInput" class="input" rows="3" placeholder="Ask about the loaded patch..."></textarea>
         <button id="pwAskBtn" class="btn-secondary" type="button">Ask Reviewer</button>
-        <div id="pwAskOutput" class="small-muted"></div>
       </div>
     </aside>
   </div>
