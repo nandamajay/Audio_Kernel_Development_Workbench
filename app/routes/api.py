@@ -14,6 +14,7 @@ from app.config import get_default_model
 from app.services.env_service import load_env_values, save_env_values
 from app.services.fs_service import list_browse_roots, list_directory, safe_path
 from app.services.git_service import list_recent_commits
+from app.services.activity_service import log_activity
 from app.services.session_service import create_session_id
 
 api_bp = Blueprint("api", __name__)
@@ -68,6 +69,36 @@ def fs_write():
     return jsonify({"ok": True, "path": target})
 
 
+@api_bp.get("/api/editor/file")
+def editor_file_get():
+    path = request.args.get("path", "")
+    target = safe_path(path)
+    if not target:
+        return jsonify({"ok": False, "error": "Path not allowed"}), 403
+    if not os.path.exists(target):
+        return jsonify({"ok": False, "error": "File not found"}), 404
+    if os.path.isdir(target):
+        return jsonify({"ok": True, "path": target, "is_dir": True, "entries": list_directory(target)})
+    with open(target, "r", encoding="utf-8", errors="replace") as handle:
+        return jsonify({"ok": True, "path": target, "is_dir": False, "content": handle.read()})
+
+
+@api_bp.post("/api/editor/file/save")
+def editor_file_save():
+    payload = request.get_json() or {}
+    path = payload.get("path", "")
+    content = payload.get("content", "")
+    target = safe_path(path)
+    if not target:
+        return jsonify({"ok": False, "error": "Path not allowed"}), 403
+    if os.path.isdir(target):
+        return jsonify({"ok": False, "error": "Cannot save to directory path"}), 400
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    with open(target, "w", encoding="utf-8") as handle:
+        handle.write(content)
+    return jsonify({"success": True, "ok": True, "path": target})
+
+
 @api_bp.get("/api/git/commits")
 def git_commits():
     n = request.args.get("n", "1")
@@ -86,7 +117,8 @@ def git_commits():
 def agent_chat_api():
     payload = request.get_json() or {}
     message = (payload.get("message") or "").strip()
-    if not message and not payload.get("attachments"):
+    files_payload = payload.get("attachments") or payload.get("files") or []
+    if not message and not files_payload:
         return jsonify({"ok": False, "error": "Message or attachments required"}), 400
 
     session_id = (payload.get("session_id") or create_session_id()).strip()
@@ -98,11 +130,12 @@ def agent_chat_api():
         session_id=session_id,
         message=message,
         model=model,
-        attachments=payload.get("attachments", []),
+        attachments=files_payload,
         selected_code=payload.get("selected_code", ""),
         filename=payload.get("filename", ""),
         page=page,
     )
+    log_activity("Agent session: " + ((message or "(attachments)")[:50]), "agent")
 
     return jsonify(
         {
@@ -112,6 +145,10 @@ def agent_chat_api():
             "response": result.get("response", ""),
             "content": result.get("response", ""),
             "message": result.get("response", ""),
+            "notices": result.get("notices", []),
+            "token_usage_estimate": result.get("token_usage_estimate", 0),
+            "token_usage_max": result.get("token_usage_max", 131072),
+            "prompt_token_estimate": result.get("prompt_token_estimate", 0),
         }
     )
 

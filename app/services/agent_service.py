@@ -26,6 +26,8 @@ ANSI_CYAN = "\x1b[36m"
 TOOL_CALL_RE = re.compile(r"^(?:TOOL_CALL:|CALL:)\s*([^\s{]+)?\s*(\{.*\})?\s*$", re.IGNORECASE)
 TOOL_RESULT_RE = re.compile(r"^(?:TOOL_RESULT:|RESULT:)\s*(.*)$", re.IGNORECASE)
 URL_RE = re.compile(r"https?://[^\s<>()]+", re.IGNORECASE)
+MAX_CONTEXT_TOKENS = 131072
+MAX_TOKENS_FOR_FILE = 80000
 
 AGENT_SYSTEM_PROMPT = (
     "You are AKDW's senior Linux audio/kernel assistant. "
@@ -58,6 +60,33 @@ AGENT_TOOLS = [
         },
     }
 ]
+
+
+def estimate_tokens(text: str) -> int:
+    return int(len(text or "") / 4)
+
+
+def prepare_file_content(file_content: str, filename: str) -> tuple[str, bool, int]:
+    """Chunk or truncate large file content before prompt injection."""
+    raw = file_content or ""
+    estimated_tokens = estimate_tokens(raw)
+    if estimated_tokens <= MAX_TOKENS_FOR_FILE:
+        return raw, False, estimated_tokens
+
+    chars_limit = MAX_TOKENS_FOR_FILE * 4
+    third = max(1, chars_limit // 3)
+    head = raw[:third]
+    mid_start = max(0, len(raw) // 2 - third // 2)
+    mid = raw[mid_start : mid_start + third]
+    tail = raw[-third:]
+    truncated = (
+        f"[FILE: {filename} - TRUNCATED for context window]\n"
+        f"[--- HEAD ---]\n{head}\n"
+        f"[--- MIDDLE SECTION ---]\n{mid}\n"
+        f"[--- TAIL ---]\n{tail}\n"
+        f"[END OF TRUNCATED FILE - original was {len(raw)} chars]"
+    )
+    return truncated, True, estimated_tokens
 
 
 def colorize_terminal_line(line: str) -> str:
@@ -173,16 +202,26 @@ class AgentService:
         self.session_histories[session_id] = [{"role": "system", "content": AGENT_SYSTEM_PROMPT}]
         return session_id
 
-    def build_user_prompt(self, message: str, attachments: List[Dict[str, str]]) -> str:
+    def build_user_prompt(self, message: str, attachments: List[Dict[str, str]]) -> tuple[str, List[str], int]:
         prompt = (message or "").strip()
         chunks = [prompt]
+        notices: List[str] = []
+        token_total = estimate_tokens(prompt)
         for item in attachments:
-            filename = item.get("filename", "attachment.txt")
+            filename = item.get("filename") or item.get("name") or "attachment.txt"
             content = item.get("content", "")
+            prepared, truncated, estimated_tokens = prepare_file_content(content, filename)
+            token_total += estimate_tokens(prepared)
+            if truncated:
+                notices.append(
+                    "📄 Large file detected (est. ~"
+                    f"{estimated_tokens:,} tokens). Analyzing key sections: header, middle, and tail. "
+                    "For full-file analysis, split into smaller chunks."
+                )
             chunks.append(
-                f"The user has attached the following file: {filename}\n\n{content}"
+                f"The user has attached the following file: {filename}\n\n{prepared}"
             )
-        return "\n\n".join([chunk for chunk in chunks if chunk])
+        return "\n\n".join([chunk for chunk in chunks if chunk]), notices, token_total
 
     def _apply_runtime_tls_settings(self) -> bool | str:
         ssl_verify_raw = os.environ.get("QGENIE_SSL_VERIFY", "true")
@@ -320,7 +359,17 @@ class AgentService:
             try:
                 response = client.chat(messages=messages)
             except Exception as exc:
-                return f"QGenie call failed, fallback response generated. Details: {exc}"
+                if has_app_context():
+                    current_app.logger.exception("QGenie chat call failed (fallback branch): %s", exc)
+                text = str(exc)
+                low = text.lower()
+                if "token" in low or "131072" in low or "too large" in low or "context length" in low:
+                    return (
+                        "⚠️ The file or conversation is too large for a single request. "
+                        "Try: (1) Asking about a specific function or section, "
+                        "(2) Starting a new session, (3) Uploading a smaller excerpt."
+                    )
+                return "⚠️ Request failed. Please retry in a new session."
         except Exception as exc:
             primary_error = exc
 
@@ -332,15 +381,29 @@ class AgentService:
                 try:
                     response = client.chat(messages=messages)
                 except Exception as retry_exc:
-                    return (
-                        "QGenie call failed, fallback response generated. "
-                        f"Details: {retry_exc}"
-                    )
+                    if has_app_context():
+                        current_app.logger.exception("QGenie retry call failed: %s", retry_exc)
+                    text = str(retry_exc)
+                    low = text.lower()
+                    if "token" in low or "131072" in low or "too large" in low or "context length" in low:
+                        return (
+                            "⚠️ The file or conversation is too large for a single request. "
+                            "Try: (1) Asking about a specific function or section, "
+                            "(2) Starting a new session, (3) Uploading a smaller excerpt."
+                        )
+                    return "⚠️ Request failed. Please retry in a new session."
             else:
-                return (
-                    "QGenie call failed, fallback response generated. "
-                    f"Details: {primary_error}"
-                )
+                if has_app_context():
+                    current_app.logger.exception("QGenie primary call failed: %s", primary_error)
+                text = str(primary_error)
+                low = text.lower()
+                if "token" in low or "131072" in low or "too large" in low or "context length" in low:
+                    return (
+                        "⚠️ The file or conversation is too large for a single request. "
+                        "Try: (1) Asking about a specific function or section, "
+                        "(2) Starting a new session, (3) Uploading a smaller excerpt."
+                    )
+                return "⚠️ Request failed. Please retry in a new session."
 
         if isinstance(response, str):
             return response
@@ -388,7 +451,7 @@ class AgentService:
     ) -> Dict[str, Any]:
         active_model = (model or get_default_model()).strip() or get_default_model()
         files = attachments or []
-        user_prompt = self.build_user_prompt(message, files)
+        user_prompt, ingestion_notices, prompt_token_estimate = self.build_user_prompt(message, files)
         history = self._seed_history(session_id)
 
         if has_app_context():
@@ -449,6 +512,17 @@ class AgentService:
             self.emit_terminal_line(session_id, step.content + "\n")
             self._persist_step(session_id, step)
 
+        for notice in ingestion_notices:
+            self.socketio.emit(
+                "status",
+                {"message": "⚠️ File is large - extracting key sections for analysis...", "type": "warning"},
+                to=session_id,
+            )
+            warn_step = AgentStep(type="response", content=notice)
+            self.emit_step(session_id, warn_step)
+            self.emit_terminal_line(session_id, notice + "\n")
+            self._persist_step(session_id, warn_step)
+
         user_content = user_prompt
         if url_context_chunks:
             user_content += "\n\nFetched URL content:\n\n" + "\n\n---\n\n".join(url_context_chunks)
@@ -467,7 +541,15 @@ class AgentService:
                 )
 
         history = self._truncate_history(history + [{"role": "user", "content": user_content}])
-        assistant_text = self._try_qgenie_chat(active_model, history)
+        history_token_estimate = estimate_tokens("\n".join(item.get("content", "") for item in history))
+        if history_token_estimate > MAX_CONTEXT_TOKENS:
+            assistant_text = (
+                "⚠️ The file or conversation is too large for a single request. "
+                "Try: (1) Asking about a specific function or section, "
+                "(2) Starting a new session, (3) Uploading a smaller excerpt."
+            )
+        else:
+            assistant_text = self._try_qgenie_chat(active_model, history)
         parsed_steps = parse_stream_steps(assistant_text)
         response_parts: List[str] = []
 
@@ -525,6 +607,10 @@ class AgentService:
             "message": "Agent response completed",
             "model": active_model,
             "response": final_response,
+            "notices": ingestion_notices,
+            "token_usage_estimate": estimate_tokens("\n".join(item.get("content", "") for item in history)),
+            "token_usage_max": MAX_CONTEXT_TOKENS,
+            "prompt_token_estimate": prompt_token_estimate,
         }
         self.socketio.emit("agent_done", done_payload, to=session_id)
         return done_payload

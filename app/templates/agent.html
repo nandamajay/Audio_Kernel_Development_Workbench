@@ -4,8 +4,7 @@
 {% block head %}
 <style>
   .chat-shell {
-    display: grid;
-    grid-template-columns: 240px 1fr;
+    display: flex;
     gap: 12px;
     height: calc(100vh - 130px);
     min-height: 0;
@@ -25,6 +24,8 @@
     gap: 10px;
     padding: 10px;
     overflow: auto;
+    width: 240px;
+    flex: none;
   }
 
   .session-head {
@@ -69,6 +70,7 @@
     display: grid;
     grid-template-rows: auto auto 1fr auto auto;
     min-height: 0;
+    flex: 1 1 auto;
   }
 
   .chat-topbar {
@@ -141,6 +143,12 @@
     border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.1));
     border-radius: 18px 18px 18px 4px;
     color: var(--text-primary);
+  }
+
+  .bubble.assistant.warning {
+    border-color: rgba(245, 158, 11, 0.45);
+    background: rgba(245, 158, 11, 0.14);
+    color: #fde68a;
   }
 
   .bubble-time {
@@ -267,6 +275,25 @@
     gap: 8px;
   }
 
+  .token-budget {
+    border: 1px solid var(--glass-border);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 12px;
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .token-budget.warn {
+    color: var(--accent-orange);
+    border-color: rgba(245, 158, 11, 0.45);
+  }
+
+  .token-budget.danger {
+    color: var(--accent-red);
+    border-color: rgba(239, 68, 68, 0.45);
+  }
+
   .agent-input-wrap {
     display: grid;
     grid-template-columns: 1fr auto;
@@ -317,15 +344,18 @@
 
   @media (max-width: 1100px) {
     .chat-shell {
-      grid-template-columns: 1fr;
+      flex-direction: column;
+    }
+    .session-sidebar {
+      width: 100%;
     }
   }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="chat-shell">
-  <aside class="session-sidebar">
+<div id="agentSplit" class="chat-shell">
+  <aside id="agentSidebarPanel" class="session-sidebar">
     <div class="session-head">
       <h3>Sessions</h3>
       <button id="newChatBtn" class="btn-primary" type="button">+ New Chat</button>
@@ -334,7 +364,9 @@
     <div id="historySidebar" class="session-groups"></div>
   </aside>
 
-  <section class="chat-pane">
+  <div id="agentResizeHandle" class="resize-handle" title="Resize panels"></div>
+
+  <section id="agentMainPanel" class="chat-pane">
     <div class="chat-topbar">
       <div class="chat-top-actions">
         <label for="agentModel">Model</label>
@@ -346,6 +378,7 @@
       </div>
       <div class="chat-top-actions">
         <span class="small-muted">Session: <span id="agentSessionLabel">-</span></span>
+        <span id="tokenBudgetIndicator" class="token-budget">🧠 ~0 tokens used / 131,072 max</span>
         <button id="clearChatBtn" class="btn-secondary" type="button">Clear</button>
       </div>
     </div>
@@ -481,6 +514,21 @@
     });
   }
 
+  function updateTokenBudget(used, max) {
+    const el = document.getElementById('tokenBudgetIndicator');
+    if (!el) return;
+    const safeMax = Number(max || 131072) || 131072;
+    const safeUsed = Number(used || 0) || 0;
+    const ratio = safeUsed / safeMax;
+    el.textContent = '🧠 ~' + safeUsed.toLocaleString() + ' tokens used / ' + safeMax.toLocaleString() + ' max';
+    el.classList.remove('warn', 'danger');
+    if (ratio >= 0.9) {
+      el.classList.add('danger');
+    } else if (ratio >= 0.7) {
+      el.classList.add('warn');
+    }
+  }
+
   async function createFreshSession() {
     let nextSessionId = createSessionId();
     try {
@@ -510,6 +558,7 @@
     document.getElementById('agentSendBtn').disabled = false;
     document.getElementById('agentFileInput').disabled = false;
     renderAttachPills();
+    updateTokenBudget(0, 131072);
     document.getElementById('agentInput').focus();
   }
 
@@ -535,8 +584,8 @@
     row.className = 'msg-row ' + (role === 'user' ? 'user' : 'assistant');
 
     const bubble = document.createElement('div');
-    if (role === 'assistant') {
-      bubble.className = 'bubble assistant ai-bubble';
+    if (role === 'assistant' || role === 'warning') {
+      bubble.className = 'bubble assistant ai-bubble' + (role === 'warning' ? ' warning' : '');
       bubble.innerHTML =
         '<button class="copy-btn" type="button" title="Copy response">📋</button>' +
         '<div class="msg-content">' + renderAssistantHtml(text || '') + '</div>';
@@ -599,29 +648,12 @@
 
   function replaceThinkingBubble(thinkingId, responseText) {
     const row = document.getElementById(thinkingId);
-    if (!row) {
-      appendBubble('assistant', responseText || '⚠️ No response received. Please retry.', true);
+    if (row) row.remove();
+    const resolved = (responseText || '').trim();
+    if (!resolved || resolved === 'Model returned an empty response.') {
       return;
     }
-    const resolved = (responseText || '').trim() || '⚠️ No response received. Please retry.';
-    const replacement = document.createElement('div');
-    replacement.className = 'msg-row assistant';
-    replacement.innerHTML =
-      '<div class="bubble assistant ai-bubble">' +
-      '<button class="copy-btn" type="button" title="Copy response">📋</button>' +
-      '<div class="msg-content">' + renderAssistantHtml(resolved) + '</div>' +
-      '<span class="bubble-time">' + nowStamp() + '</span></div>';
-    row.replaceWith(replacement);
-    const copyBtn = replacement.querySelector('.copy-btn');
-    if (copyBtn) {
-      copyBtn.addEventListener('click', function () {
-        copyMsg(copyBtn);
-      });
-    }
-    const contentEl = replacement.querySelector('.msg-content');
-    if (contentEl) {
-      decorateCodeBlocks(contentEl);
-    }
+    appendBubble('assistant', resolved, true);
     scrollToBottom();
   }
 
@@ -682,12 +714,16 @@
       });
       const data = await res.json();
       const responseText = (data.response || data.content || data.message || '').trim();
-      replaceThinkingBubble(thinkingId, responseText || '⚠️ No response received. Please retry.');
+      (data.notices || []).forEach(function (notice) {
+        appendBubble('warning', notice, true);
+      });
+      replaceThinkingBubble(thinkingId, responseText);
+      updateTokenBudget(data.token_usage_estimate || 0, data.token_usage_max || 131072);
       attached = [];
       renderAttachPills();
       loadHistorySidebar();
     } catch (err) {
-      replaceThinkingBubble(thinkingId, 'Request failed: ' + err);
+      replaceThinkingBubble(thinkingId, '⚠️ Request failed. Please retry.');
     } finally {
       setSendWaiting(false);
       input.focus();
@@ -813,6 +849,11 @@
   });
 
   document.addEventListener('DOMContentLoaded', function() {
+    if (window.ResizablePanel) {
+      new ResizablePanel('#agentSplit', [
+        { handleId: 'agentResizeHandle', leftPanelId: 'agentSidebarPanel', rightPanelId: 'agentMainPanel' },
+      ]);
+    }
     createFreshSession();
     loadHistorySidebar();
     autoResizeInput();
