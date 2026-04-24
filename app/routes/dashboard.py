@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
+import subprocess
+from datetime import datetime, timezone
 
 from flask import Blueprint, current_app, jsonify, render_template, request, url_for
 
@@ -13,7 +16,7 @@ from app.config import (
     get_default_model,
     get_user_display_name,
 )
-from app.models import ConversionJob, PatchRecord, TriageSession
+from app.models import ConversionJob, ReviewSession, TriageSession
 from app.services.env_service import (
     current_username,
     load_env_values,
@@ -24,6 +27,41 @@ from app.services.env_service import (
 
 
 dashboard_bp = Blueprint("dashboard", __name__)
+
+
+def _relative_time(value: datetime | None) -> str:
+    if not value:
+        return "N/A"
+    now = datetime.now(timezone.utc)
+    dt = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    diff = now - dt
+    sec = int(max(0, diff.total_seconds()))
+    if sec < 60:
+        return "just now"
+    if sec < 3600:
+        return f"{sec // 60}m ago"
+    if sec < 86400:
+        return f"{sec // 3600}h ago"
+    if sec < 86400 * 30:
+        return f"{sec // 86400}d ago"
+    return dt.strftime("%Y-%m-%d")
+
+
+def _latest_git_activity() -> str:
+    kernel_root = current_app.config.get("KERNEL_SRC_PATH", "/app/kernel")
+    try:
+        proc = subprocess.run(
+            ["git", "-C", kernel_root, "log", "-1", "--format=%ar"],
+            capture_output=True,
+            text=True,
+            timeout=4,
+        )
+        output = (proc.stdout or "").strip()
+        if output:
+            return output
+    except Exception:
+        pass
+    return "No git history"
 
 
 def _refresh_runtime_config(updates: dict) -> None:
@@ -58,23 +96,110 @@ def _refresh_runtime_config(updates: dict) -> None:
 
 @dashboard_bp.get("/")
 def dashboard():
-    stats = {
-        "patches_reviewed": PatchRecord.query.count(),
-        "drivers_converted": ConversionJob.query.count(),
-        "triage_sessions": TriageSession.query.count(),
-        "last_git_activity": "No activity yet",
-    }
-    recent_activity = [
-        {"label": "Workspace initialized", "timestamp": "just now"},
-        {"label": "Dashboard loaded", "timestamp": "just now"},
-    ]
     return render_template(
         "dashboard.html",
-        stats=stats,
-        recent_activity=recent_activity,
         user_display_name=get_user_display_name(),
         default_model=get_default_model(),
     )
+
+
+@dashboard_bp.get("/api/dashboard/stats")
+def dashboard_stats():
+    return jsonify(
+        {
+            "patches_reviewed": ReviewSession.query.count(),
+            "drivers_converted": ConversionJob.query.count(),
+            "triage_sessions": TriageSession.query.count(),
+            "last_git_activity": _latest_git_activity(),
+        }
+    )
+
+
+@dashboard_bp.get("/api/dashboard/activity")
+def dashboard_activity():
+    events = []
+
+    for row in ReviewSession.query.order_by(ReviewSession.created_at.desc()).limit(5).all():
+        label = getattr(row, "patch_filename", None) or row.session_id
+        events.append(
+            {
+                "type": "review",
+                "desc": f"Reviewed {label}",
+                "time": _relative_time(row.created_at),
+                "sort_ts": row.created_at.timestamp() if row.created_at else 0,
+            }
+        )
+
+    for row in TriageSession.query.order_by(TriageSession.created_at.desc()).limit(5).all():
+        desc = "Triaged crash log"
+        if row.input_payload:
+            first_line = (row.input_payload.splitlines() or [""])[0].strip()
+            if first_line:
+                desc = f"Triaged {first_line[:64]}"
+        events.append(
+            {
+                "type": "triage",
+                "desc": desc,
+                "time": _relative_time(row.created_at),
+                "sort_ts": row.created_at.timestamp() if row.created_at else 0,
+            }
+        )
+
+    for row in ConversionJob.query.order_by(ConversionJob.created_at.desc()).limit(5).all():
+        events.append(
+            {
+                "type": "convert",
+                "desc": f"Converted driver ({row.conversion_type or 'generic'})",
+                "time": _relative_time(row.created_at),
+                "sort_ts": row.created_at.timestamp() if row.created_at else 0,
+            }
+        )
+
+    if not events:
+        events = [
+            {"type": "agent", "desc": "Dashboard loaded", "time": "just now", "sort_ts": 2},
+            {"type": "agent", "desc": "Workspace initialized", "time": "just now", "sort_ts": 1},
+        ]
+
+    events.sort(key=lambda item: item.get("sort_ts", 0), reverse=True)
+    return jsonify([{k: v for k, v in event.items() if k != "sort_ts"} for event in events[:10]])
+
+
+@dashboard_bp.get("/api/dashboard/patch_health")
+def dashboard_patch_health():
+    rows = ReviewSession.query.order_by(ReviewSession.updated_at.desc()).limit(5).all()
+    payload = []
+    for row in rows:
+        summary = {}
+        try:
+            summary = json.loads(row.summary or "{}")
+        except Exception:
+            summary = {}
+        critical = int(summary.get("critical", 0) or 0)
+        warning = int(summary.get("warning", 0) or 0)
+        suggestion = int(summary.get("suggestion", 0) or 0)
+        score = max(0, 100 - (critical * 25 + warning * 10 + suggestion * 4))
+        if critical > 0:
+            status = "fail"
+            status_text = f"{critical} critical"
+        elif warning > 0:
+            status = "warn"
+            status_text = f"{warning} warning(s)"
+        else:
+            status = "pass"
+            status_text = "Clean"
+
+        payload.append(
+            {
+                "patch_name": getattr(row, "patch_filename", None) or row.session_id,
+                "score": score,
+                "status": status,
+                "status_text": status_text,
+                "updated_at": _relative_time(row.updated_at),
+            }
+        )
+
+    return jsonify(payload)
 
 
 @dashboard_bp.get("/health")

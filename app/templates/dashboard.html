@@ -3,47 +3,59 @@
 {% block title %}Dashboard{% endblock %}
 
 {% block content %}
-<div class="dashboard-wrap premium-dashboard">
-  <section class="hero-banner">
-    <div class="hero-banner-grid"></div>
-    <div class="hero-banner-content">
-      <h2>👋 Welcome back, {{ user_display_name }}</h2>
-      <div class="hero-pills">
-        <span class="status-pill status-online">● QGenie Online</span>
-        <span class="status-pill"> {{ default_model }} ★</span>
+<div class="dashboard-wrap premium-dashboard dashboard-v6">
+  <section class="hero-banner hero-banner-v6">
+    <div class="hero-left">
+      <h1>👋 Welcome back, {{ user_display_name }}</h1>
+      <p class="hero-sub">Audio Kernel Driver Workbench · Phase 3</p>
+      <div class="hero-badges">
+        <span class="badge badge-blue">🟢 QGenie Online</span>
+        <span class="badge badge-green">Phase 3 Active</span>
+        <span class="badge badge-muted">v3.0 Phase 3</span>
       </div>
-      <p>Your audio kernel development workspace</p>
+      <div class="hero-badges">
+        <span class="badge badge-muted">{{ default_model }}</span>
+      </div>
+    </div>
+    <div class="hero-right">
+      <div class="wave-wrap" aria-hidden="true">
+        <span class="wave-bar"></span>
+        <span class="wave-bar"></span>
+        <span class="wave-bar"></span>
+        <span class="wave-bar"></span>
+        <span class="wave-bar"></span>
+      </div>
     </div>
   </section>
 
-  <section class="stats-grid stats-grid-premium">
-    <article class="stat-card">
-      <span class="accent-bar accent-blue"></span>
-      <div class="stat-head"><span class="stat-label">Patches</span><span class="stat-icon">🩹</span></div>
-      <div class="stat-value">{{ stats.patches_reviewed }}</div>
-      <div class="stat-trend">No regressions tracked yet</div>
+  <section class="stats-grid stats-grid-dashboard">
+    <article class="stat-card stat-card-v6">
+      <div class="stat-icon">🩹</div>
+      <div class="stat-value" id="stat-patches">--</div>
+      <div class="stat-label">Patches Reviewed</div>
+      <div class="stat-delta" id="delta-patches">Live from review sessions</div>
     </article>
-    <article class="stat-card">
-      <span class="accent-bar accent-purple"></span>
-      <div class="stat-head"><span class="stat-label">Drivers</span><span class="stat-icon">🔧</span></div>
-      <div class="stat-value">{{ stats.drivers_converted }}</div>
-      <div class="stat-trend">Conversion queue idle</div>
+    <article class="stat-card stat-card-v6">
+      <div class="stat-icon">🔄</div>
+      <div class="stat-value" id="stat-conversions">--</div>
+      <div class="stat-label">Drivers Converted</div>
+      <div class="stat-delta">Conversion jobs tracked</div>
     </article>
-    <article class="stat-card">
-      <span class="accent-bar accent-orange"></span>
-      <div class="stat-head"><span class="stat-label">Triage</span><span class="stat-icon">🩺</span></div>
-      <div class="stat-value">{{ stats.triage_sessions }}</div>
-      <div class="stat-trend">Awaiting crash logs</div>
+    <article class="stat-card stat-card-v6">
+      <div class="stat-icon">🩺</div>
+      <div class="stat-value" id="stat-triage">--</div>
+      <div class="stat-label">Triage Sessions</div>
+      <div class="stat-delta">Crash analysis sessions</div>
     </article>
-    <article class="stat-card">
-      <span class="accent-bar accent-green"></span>
-      <div class="stat-head"><span class="stat-label">Git</span><span class="stat-icon">🌿</span></div>
-      <div class="stat-value">{{ stats.last_git_activity }}</div>
-      <div class="stat-trend">Workspace initialized</div>
+    <article class="stat-card stat-card-v6">
+      <div class="stat-icon">🌿</div>
+      <div class="stat-value stat-value-text" id="stat-git">--</div>
+      <div class="stat-label">Last Git Activity</div>
+      <div class="stat-delta">Kernel workspace</div>
     </article>
   </section>
 
-  <section class="cards-grid action-grid">
+  <section class="cards-grid action-grid dashboard-actions">
     <a class="action-card" href="{{ url_for('patchwise.patchwise_home') }}">
       <span class="action-icon">🔧</span>
       <span class="action-title">Review My Patches</span>
@@ -75,44 +87,178 @@
     <article class="panel premium-panel">
       <div class="panel-head">
         <h3>📋 Recent Activity</h3>
-        <a href="#" class="panel-link">View All</a>
+        <a href="{{ url_for('patchwise.patchwise_home') }}" class="panel-link">View All</a>
       </div>
-      {% if recent_activity %}
-      <ul class="activity-list premium-activity-list">
-        {% for item in recent_activity %}
-        <li>
-          <span class="activity-dot"></span>
-          <span class="activity-label">{{ item.label }}</span>
-          <time>{{ item.timestamp }}</time>
-        </li>
-        {% endfor %}
+      <ul class="activity-list premium-activity-list" id="recentActivityList">
+        <li><span class="activity-dot"></span><span class="activity-label">Loading activity...</span><time>now</time></li>
       </ul>
-      {% else %}
-      <div class="empty-activity">🕘 No activity yet</div>
-      {% endif %}
     </article>
 
     <article class="panel premium-panel">
-      <h3>📊 Patch Health</h3>
-      <div class="health-row">
-        <span>Checkpatch Issues</span>
-        <span class="health-pill na">N/A</span>
+      <div class="panel-head">
+        <h3>📊 Patch Health</h3>
       </div>
-      <div class="health-row">
-        <span>Upstream Readiness</span>
-        <span class="health-pill na">N/A</span>
-      </div>
-      <div class="health-row">
-        <span>Last Review Score</span>
-        <span class="health-pill na">N/A</span>
+      <div id="patchHealthRows">
+        <div class="health-row"><span>Checkpatch Issues</span><span class="health-pill na">N/A</span></div>
+        <div class="health-row"><span>Upstream Readiness</span><span class="health-pill na">N/A</span></div>
+        <div class="health-row"><span>Last Review Score</span><span class="health-pill na">N/A</span></div>
       </div>
     </article>
   </section>
 
-  <section class="tips-strip">
-    <span class="tip-chip">💡 Drop a .patch file into Patch Workshop to start</span>
-    <span class="tip-chip">💡 Use Triage to analyze kernel crash dumps</span>
-    <span class="tip-chip">💡 Code Editor supports Monaco with AI inline review</span>
+  <section class="panel-grid bottom-panels">
+    <article class="panel premium-panel">
+      <div class="panel-head">
+        <h3>📬 Upstream Tracker Preview</h3>
+        <a href="/upstream/" class="panel-link">View All →</a>
+      </div>
+      <div id="upstreamPreviewList" class="upstream-preview-list">
+        <div class="small-muted">No tracked patches yet.</div>
+      </div>
+    </article>
+    <article class="panel premium-panel tips-panel">
+      <div class="panel-head">
+        <h3>💡 Tips & Shortcuts</h3>
+      </div>
+      <div id="rotatingTip" class="rotating-tip">
+        Drop a .patch file onto Patch Workshop to start a review.
+      </div>
+    </article>
   </section>
 </div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+  function countUp(el, target, duration = 800) {
+    let start = 0;
+    const step = Math.max(1, Math.ceil(target / 30));
+    const interval = Math.max(16, Math.floor(duration / 30));
+    const timer = setInterval(() => {
+      start = Math.min(start + step, target);
+      el.textContent = String(start);
+      if (start >= target) {
+        clearInterval(timer);
+      }
+    }, interval);
+  }
+
+  function activityIcon(type) {
+    const map = { review: "🩹", triage: "🩺", convert: "🔄", commit: "📝", agent: "🤖" };
+    return map[type] || "•";
+  }
+
+  async function loadDashboardStats() {
+    const res = await fetch("/api/dashboard/stats");
+    if (!res.ok) return;
+    const data = await res.json();
+    countUp(document.getElementById("stat-patches"), Number(data.patches_reviewed || 0));
+    countUp(document.getElementById("stat-conversions"), Number(data.drivers_converted || 0));
+    countUp(document.getElementById("stat-triage"), Number(data.triage_sessions || 0));
+    document.getElementById("stat-git").textContent = data.last_git_activity || "No git history";
+  }
+
+  async function loadRecentActivity() {
+    const list = document.getElementById("recentActivityList");
+    const res = await fetch("/api/dashboard/activity");
+    if (!res.ok) {
+      list.innerHTML = '<li><span class="activity-dot"></span><span class="activity-label">No activity yet</span><time>now</time></li>';
+      return;
+    }
+    const data = await res.json();
+    if (!Array.isArray(data) || !data.length) {
+      list.innerHTML = '<li><span class="activity-dot"></span><span class="activity-label">No activity yet</span><time>now</time></li>';
+      return;
+    }
+    list.innerHTML = data.map(item => (
+      '<li>'
+      + '<span class="activity-dot"></span>'
+      + '<span class="activity-label">' + activityIcon(item.type) + ' ' + (item.desc || "Activity") + '</span>'
+      + '<time>' + (item.time || "now") + '</time>'
+      + '</li>'
+    )).join("");
+  }
+
+  async function loadPatchHealth() {
+    const wrap = document.getElementById("patchHealthRows");
+    const res = await fetch("/api/dashboard/patch_health");
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!Array.isArray(data) || !data.length) {
+      return;
+    }
+    wrap.innerHTML = data.map(item => {
+      let statusClass = "na";
+      let statusText = "N/A";
+      if (item.status === "pass") {
+        statusClass = "pass";
+        statusText = "✅ " + (item.status_text || "Clean");
+      } else if (item.status === "warn") {
+        statusClass = "warn";
+        statusText = "⚠️ " + (item.status_text || "Warnings");
+      } else if (item.status === "fail") {
+        statusClass = "fail";
+        statusText = "❌ " + (item.status_text || "Fail");
+      }
+      return (
+        '<div class="health-row">'
+        + '<span>' + (item.patch_name || "Patch") + ' <span class="small-muted">(' + (item.score || 0) + '%)</span></span>'
+        + '<span class="health-pill ' + statusClass + '">' + statusText + '</span>'
+        + '</div>'
+      );
+    }).join("");
+  }
+
+  async function loadUpstreamPreview() {
+    const box = document.getElementById("upstreamPreviewList");
+    try {
+      const res = await fetch("/api/upstream/list");
+      if (!res.ok) {
+        box.innerHTML = '<div class="small-muted">Upstream tracker is available after Section 6 setup.</div>';
+        return;
+      }
+      const rows = await res.json();
+      if (!Array.isArray(rows) || rows.length === 0) {
+        box.innerHTML = '<div class="small-muted">No tracked patches yet.</div>';
+        return;
+      }
+      box.innerHTML = rows.slice(0, 3).map(item => (
+        '<div class="upstream-preview-row">'
+        + '<span>' + (item.title || item.lore_url || "Patch thread") + '</span>'
+        + '<span class="health-pill ' + (item.status || "na") + '">' + (item.status || "submitted") + '</span>'
+        + '</div>'
+      )).join("");
+    } catch (err) {
+      box.innerHTML = '<div class="small-muted">Unable to load upstream tracker preview.</div>';
+    }
+  }
+
+  function rotateTips() {
+    const tips = [
+      "Drop a .patch file onto Patch Workshop to start a review.",
+      "Use Ctrl+/ in Monaco to comment or uncomment code quickly.",
+      "Paste a lore.kernel.org URL to auto-fetch LKML context.",
+    ];
+    let idx = 0;
+    const el = document.getElementById("rotatingTip");
+    setInterval(() => {
+      idx = (idx + 1) % tips.length;
+      el.classList.remove("show");
+      setTimeout(() => {
+        el.textContent = tips[idx];
+        el.classList.add("show");
+      }, 220);
+    }, 8000);
+  }
+
+  document.addEventListener("DOMContentLoaded", async () => {
+    document.getElementById("rotatingTip").classList.add("show");
+    await loadDashboardStats();
+    await loadRecentActivity();
+    await loadPatchHealth();
+    await loadUpstreamPreview();
+    rotateTips();
+  });
+</script>
 {% endblock %}
