@@ -17,6 +17,7 @@
   .dual-center { width:45%; flex:none; }
   .dual-right { flex:1 1 auto; }
   .phase-card { border:1px solid var(--glass-border); border-radius:12px; background:rgba(255,255,255,.02); padding:10px; margin-bottom:10px; }
+  .phase-card.current-phase { border-color:rgba(59,130,246,.48); box-shadow:var(--shadow-glow); background:rgba(59,130,246,.08); }
   .phase-head { display:flex; justify-content:space-between; align-items:center; gap:8px; }
   .phase-badge { border:1px solid var(--glass-border); border-radius:999px; padding:2px 8px; font-size:11px; color:var(--text-muted); }
   .phase-badge.IN_PROGRESS { color:var(--accent-blue); border-color:rgba(59,130,246,.45); }
@@ -50,6 +51,7 @@
     <div style="display:flex;align-items:center;gap:8px;">
       <span id="runStatusPill" class="status-pill IDLE">IDLE</span>
       <button id="autoPhaseBtn" class="btn-secondary" type="button">⚙ Auto Create Phase 5</button>
+      <button id="activatePhaseBtn" class="btn-secondary" type="button">▶ Activate Phase 5</button>
       <button id="startRunBtn" class="btn-primary" type="button">▶ Start Agent Run</button>
     </div>
   </div>
@@ -123,9 +125,11 @@
     const wrap=document.getElementById('planAccordion');
     wrap.innerHTML='';
     const current = currentTaskId;
+    const currentPhase = Number(plan.current_phase || 0);
     (plan.phases||[]).forEach(ph=>{
       const card=document.createElement('div');
-      card.className='phase-card';
+      const phaseId = Number(ph.id || 0);
+      card.className='phase-card' + (phaseId === currentPhase ? ' current-phase' : '');
       const tasks=(ph.tasks||[]).map(t=>{
         const cls='task-item'+((current && t.id===current)?' current-task':'');
         return '<div class="'+cls+'">'+t.id+' · '+t.name+' <span class="small-muted">['+t.status+']</span></div>';
@@ -256,6 +260,33 @@
     }
     await refreshPlanOnly();
     alert((d.created ? 'Phase 5 created.' : 'Phase 5 already exists.') + ' Tasks: ' + (d.tasks_created || 0));
+  });
+
+  async function activatePhase5(force){
+    const r=await fetch('/api/dual-agent/phase/activate/5', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ force: !!force })
+    });
+    const d=await r.json();
+    if(!r.ok){
+      const pending = (d.prior_incomplete || []).map(p => 'Phase ' + p.id + ' [' + p.status + ']').join(', ');
+      if(!force && pending){
+        const ok = confirm((d.error || 'Cannot activate phase') + '\\nPending: ' + pending + '\\n\\nForce activate anyway?');
+        if(ok){
+          return activatePhase5(true);
+        }
+      } else {
+        alert(d.error || 'Failed to activate phase');
+      }
+      return;
+    }
+    await refreshPlanOnly();
+    alert('Phase 5 activated. Current phase: ' + d.current_phase);
+  }
+
+  document.getElementById('activatePhaseBtn').addEventListener('click', function(){
+    activatePhase5(false);
   });
 
   refreshPlanOnly();

@@ -20,9 +20,19 @@ class ProjectPlanManager:
             json.dump(plan, f, indent=2)
 
     def get_next_pending_task(self):
-        """Return the next PENDING task across all IN_PROGRESS phases."""
+        """Return the next PENDING task, prioritizing current_phase first."""
         plan = self.load()
-        for phase in plan["phases"]:
+        phases = list(plan.get("phases", []))
+        current_phase = int(plan.get("current_phase", 0) or 0)
+
+        def _phase_id(phase_obj):
+            try:
+                return int(phase_obj.get("id", 0) or 0)
+            except Exception:
+                return 0
+
+        phases.sort(key=lambda p: (0 if _phase_id(p) == current_phase else 1, _phase_id(p)))
+        for phase in phases:
             if phase["status"] in ("IN_PROGRESS", "PLANNED"):
                 for task in phase.get("tasks", []):
                     if task["status"] == "PENDING":
@@ -189,4 +199,72 @@ class ProjectPlanManager:
             "tasks_created": len(tasks),
             "phase_status": phase_status,
             "message": "Phase created",
+        }
+
+    def activate_phase(self, phase_id: int, force: bool = False) -> dict:
+        """Set an existing phase as the active phase/current_phase.
+
+        If prior phases are incomplete, activation is blocked unless force=True.
+        """
+        plan = self.load()
+        phases = list(plan.get("phases", []))
+
+        target = next((p for p in phases if int(p.get("id", 0) or 0) == int(phase_id)), None)
+        if not target:
+            return {
+                "ok": False,
+                "error": f"Phase {phase_id} not found",
+                "phase_id": phase_id,
+            }
+
+        current_phase = int(plan.get("current_phase", 0) or 0)
+        if current_phase == int(phase_id) and target.get("status") in ("IN_PROGRESS", "COMPLETE"):
+            return {
+                "ok": True,
+                "phase_id": int(phase_id),
+                "current_phase": int(phase_id),
+                "forced": bool(force),
+                "prior_incomplete": [],
+                "message": "Phase already active",
+            }
+
+        prior_incomplete = [
+            {
+                "id": int(p.get("id", 0) or 0),
+                "name": p.get("name", ""),
+                "status": p.get("status", "PLANNED"),
+            }
+            for p in phases
+            if int(p.get("id", 0) or 0) < int(phase_id)
+            and p.get("status") != "COMPLETE"
+        ]
+        if prior_incomplete and not force:
+            return {
+                "ok": False,
+                "error": f"Cannot activate Phase {phase_id} while prior phases are incomplete",
+                "phase_id": phase_id,
+                "prior_incomplete": prior_incomplete,
+            }
+
+        for phase in phases:
+            pid = int(phase.get("id", 0) or 0)
+            if pid == int(phase_id):
+                if phase.get("status") != "COMPLETE":
+                    phase["status"] = "IN_PROGRESS"
+            elif phase.get("status") == "IN_PROGRESS":
+                tasks = phase.get("tasks", [])
+                if tasks and all(t.get("status") == "COMPLETE" for t in tasks):
+                    phase["status"] = "COMPLETE"
+                else:
+                    phase["status"] = "PLANNED"
+
+        plan["phases"] = phases
+        plan["current_phase"] = int(phase_id)
+        self.save(plan)
+        return {
+            "ok": True,
+            "phase_id": int(phase_id),
+            "current_phase": int(phase_id),
+            "forced": bool(force),
+            "prior_incomplete": prior_incomplete,
         }

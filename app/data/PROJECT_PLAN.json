@@ -1,7 +1,7 @@
 {
   "project": "AKDW Audio Kernel Driver Workbench",
   "owner": "nandam@qti.qualcomm.com",
-  "current_phase": 3,
+  "current_phase": 5,
   "phases": [
     {
       "id": 1,
@@ -18,7 +18,7 @@
     {
       "id": 3,
       "name": "Terminal-IDE + Agent Mode + Glassmorphism",
-      "status": "IN_PROGRESS",
+      "status": "PLANNED",
       "tasks": [
         {
           "id": "3.1",
@@ -78,7 +78,7 @@
     {
       "id": 5,
       "name": "Enhancement Execution Sprint",
-      "status": "PLANNED",
+      "status": "IN_PROGRESS",
       "tasks": [
         {
           "id": "5.1",

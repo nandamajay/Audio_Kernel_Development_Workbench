@@ -177,11 +177,24 @@ def human_approve(task_id):
 @bp.route("/api/dual-agent/phase5/auto-create", methods=["POST"])
 def auto_create_phase5():
     data = request.get_json(silent=True) or {}
+    plan_mgr = ProjectPlanManager()
     phase_name = (data.get("phase_name") or "Enhancement Execution Sprint").strip()
-    result = ProjectPlanManager().auto_create_phase_from_enhancements(
+    result = plan_mgr.auto_create_phase_from_enhancements(
         phase_id=5,
         phase_name=phase_name,
     )
+    if bool(data.get("activate", False)):
+        activation = plan_mgr.activate_phase(5, force=bool(data.get("force", False)))
+        result["activation"] = activation
+    return jsonify(result)
+
+
+@bp.route("/api/dual-agent/phase/activate/<int:phase_id>", methods=["POST"])
+def activate_phase(phase_id: int):
+    data = request.get_json(silent=True) or {}
+    result = ProjectPlanManager().activate_phase(phase_id, force=bool(data.get("force", False)))
+    if not result.get("ok", False):
+        return jsonify(result), 409
     return jsonify(result)
 
 
