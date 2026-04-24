@@ -107,6 +107,49 @@
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.02);
   }
+
+  .setting-group {
+    display: grid;
+    gap: 8px;
+    margin-top: 2px;
+  }
+
+  .email-chips-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 36px;
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .email-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--glass-border);
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 12px;
+    background: rgba(59, 130, 246, 0.16);
+  }
+
+  .email-chip button {
+    border: none;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+  }
+
+  .email-add-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+  }
 </style>
 {% endblock %}
 
@@ -117,6 +160,9 @@
 
     <label>Display Name</label>
     <input id="displayName" class="input" value="{{ values.get('USER_DISPLAY_NAME', '') }}">
+
+    <label>User Email</label>
+    <input id="userEmail" class="input" type="email" value="{{ values.get('USER_EMAIL', '') }}" placeholder="you@example.com">
 
     <label>QGenie API Key</label>
     <input id="apiKey" class="input" type="password" placeholder="Leave blank to keep existing">
@@ -151,6 +197,37 @@
     </div>
     <div id="extraPathList" class="extra-path-list"></div>
 
+    <div class="setting-group">
+      <label>📧 Tracked Email IDs (for Upstream Tracker)</label>
+      <div class="email-chips-container" id="emailChipsContainer"></div>
+      <div class="email-add-row">
+        <input type="email" id="newTrackedEmail" class="input" placeholder="e.g. nandam@qti.qualcomm.com">
+        <button id="addTrackedEmailBtn" class="btn-secondary" type="button">+ Add</button>
+      </div>
+      <small class="small-muted">Primary email is always included in Upstream Tracker.</small>
+    </div>
+
+    <label>SMTP Host</label>
+    <input id="smtpHost" class="input" value="{{ values.get('SMTP_HOST', 'localhost') }}">
+
+    <label>SMTP Port</label>
+    <input id="smtpPort" class="input" type="number" value="{{ values.get('SMTP_PORT', '25') }}">
+
+    <label>SMTP From</label>
+    <input id="smtpFrom" class="input" value="{{ values.get('AKDW_EMAIL_FROM', 'nandam@qti.qualcomm.com') }}">
+
+    <label>Session Retention Days</label>
+    <input id="sessionRetentionDays" class="input" type="number" value="{{ values.get('SESSION_RETENTION_DAYS', '30') }}">
+
+    <label>Agent Thinking Visible</label>
+    <select id="agentShowThinking" class="input">
+      <option value="true" {% if values.get('AGENT_SHOW_THINKING', 'true') == 'true' %}selected{% endif %}>true</option>
+      <option value="false" {% if values.get('AGENT_SHOW_THINKING', 'true') == 'false' %}selected{% endif %}>false</option>
+    </select>
+
+    <label>Max Token Warning %</label>
+    <input id="tokenWarnThreshold" class="input" type="number" min="1" max="100" value="{{ values.get('TOKEN_WARN_THRESHOLD', '75') }}">
+
     <div class="setup-actions">
       <a class="btn-secondary" href="{{ url_for('dashboard.setup_page') }}">Open Setup Wizard</a>
       <button id="saveBtn" class="settings-save" type="button">Save Settings</button>
@@ -166,6 +243,7 @@
   const statusEl = document.getElementById('setupStatus');
   const extraListEl = document.getElementById('extraPathList');
   const extraPaths = {{ extra_paths | tojson }};
+  let trackedEmails = [];
 
   function setStatus(ok, message) {
     statusEl.className = 'settings-status ' + (ok ? 'ok' : 'err');
@@ -195,6 +273,74 @@
     });
   }
 
+  function renderTrackedEmails() {
+    const chips = document.getElementById('emailChipsContainer');
+    chips.innerHTML = '';
+    if (!trackedEmails.length) {
+      chips.innerHTML = '<span class="small-muted">No tracked emails yet.</span>';
+      return;
+    }
+    trackedEmails.forEach(function (email) {
+      const chip = document.createElement('span');
+      chip.className = 'email-chip';
+      chip.innerHTML = '<span>' + email + '</span>';
+      const rm = document.createElement('button');
+      rm.type = 'button';
+      rm.textContent = '✕';
+      rm.addEventListener('click', function () {
+        removeTrackedEmail(email);
+      });
+      chip.appendChild(rm);
+      chips.appendChild(chip);
+    });
+  }
+
+  async function loadTrackedEmails() {
+    try {
+      const res = await fetch('/api/upstream/emails');
+      const data = await res.json();
+      trackedEmails = Array.isArray(data.emails) ? data.emails : [];
+      renderTrackedEmails();
+    } catch (err) {
+      trackedEmails = [];
+      renderTrackedEmails();
+    }
+  }
+
+  async function addTrackedEmail() {
+    const input = document.getElementById('newTrackedEmail');
+    const email = (input.value || '').trim();
+    if (!email) return;
+    const res = await fetch('/api/upstream/emails', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setStatus(false, data.error || 'Failed to add email');
+      return;
+    }
+    trackedEmails = Array.isArray(data.emails) ? data.emails : trackedEmails;
+    input.value = '';
+    renderTrackedEmails();
+  }
+
+  async function removeTrackedEmail(email) {
+    const res = await fetch('/api/upstream/emails', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setStatus(false, data.error || 'Failed to remove email');
+      return;
+    }
+    trackedEmails = Array.isArray(data.emails) ? data.emails : trackedEmails;
+    renderTrackedEmails();
+  }
+
   document.getElementById('addExtraPathBtn').addEventListener('click', async function () {
     const input = document.getElementById('extraPathInput');
     const hostPath = input.value.trim();
@@ -220,6 +366,7 @@
   document.getElementById('saveBtn').addEventListener('click', async function () {
     const payload = {
       user_display_name: document.getElementById('displayName').value,
+      user_email: document.getElementById('userEmail').value,
       api_key: document.getElementById('apiKey').value,
       provider_url: document.getElementById('providerUrl').value,
       ssl_verify: document.getElementById('sslVerify').value,
@@ -227,6 +374,13 @@
       default_model: document.getElementById('defaultModel').value,
       kernel_src_path: document.getElementById('kernelSrcPath').value,
       extra_workspace_paths: extraPaths,
+      upstream_tracked_emails: JSON.stringify(trackedEmails),
+      smtp_host: document.getElementById('smtpHost').value,
+      smtp_port: document.getElementById('smtpPort').value,
+      smtp_from: document.getElementById('smtpFrom').value,
+      session_retention_days: document.getElementById('sessionRetentionDays').value,
+      agent_show_thinking: document.getElementById('agentShowThinking').value,
+      token_warn_threshold: document.getElementById('tokenWarnThreshold').value,
     };
     const resp = await fetch('/api/settings/save', {
       method: 'POST',
@@ -237,7 +391,16 @@
     setStatus(!!data.ok, data.message || 'Settings updated');
   });
 
+  document.getElementById('addTrackedEmailBtn').addEventListener('click', addTrackedEmail);
+  document.getElementById('newTrackedEmail').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addTrackedEmail();
+    }
+  });
+
   renderExtraPaths();
+  loadTrackedEmails();
 })();
 </script>
 {% endblock %}

@@ -73,6 +73,7 @@ def _refresh_runtime_config(updates: dict) -> None:
         "QGENIE_SSL_VERIFY": "QGENIE_SSL_VERIFY",
         "QGENIE_CA_BUNDLE": "QGENIE_CA_BUNDLE",
         "USER_DISPLAY_NAME": "USER_DISPLAY_NAME",
+        "USER_EMAIL": "USER_EMAIL",
         "KERNEL_SRC_PATH": "KERNEL_SRC_PATH",
         "EXTRA_WORKSPACE_PATHS": "EXTRA_WORKSPACE_PATHS",
     }
@@ -286,6 +287,16 @@ def save_setup():
 @dashboard_bp.get("/settings/")
 def settings_page():
     env_values = load_env_values()
+    if not env_values.get("USER_EMAIL"):
+        display = (env_values.get("USER_DISPLAY_NAME") or "").strip()
+        env_values["USER_EMAIL"] = display if "@" in display else ""
+    env_values.setdefault("UPSTREAM_TRACKED_EMAILS", "[]")
+    env_values.setdefault("SMTP_HOST", "localhost")
+    env_values.setdefault("SMTP_PORT", "25")
+    env_values.setdefault("AKDW_EMAIL_FROM", "nandam@qti.qualcomm.com")
+    env_values.setdefault("SESSION_RETENTION_DAYS", "30")
+    env_values.setdefault("AGENT_SHOW_THINKING", "true")
+    env_values.setdefault("TOKEN_WARN_THRESHOLD", "75")
     models = get_available_models()
     return render_template(
         "settings.html",
@@ -317,6 +328,7 @@ def save_settings():
         normalized_extra_paths = []
     updates = {
         "USER_DISPLAY_NAME": (display_name_raw or "").strip(),
+        "USER_EMAIL": (payload.get("user_email") or "").strip(),
         "QGENIE_DEFAULT_MODEL": (payload.get("default_model") or "auto").strip(),
         "KERNEL_SRC_PATH": (kernel_src_raw or Config.KERNEL_SRC_PATH).strip(),
         "QGENIE_SSL_VERIFY": "true"
@@ -324,6 +336,15 @@ def save_settings():
         else "false",
         "QGENIE_CA_BUNDLE": (ca_bundle_raw or "").strip(),
         "EXTRA_WORKSPACE_PATHS": ",".join(normalized_extra_paths),
+        "UPSTREAM_TRACKED_EMAILS": str(payload.get("upstream_tracked_emails") or "[]"),
+        "SMTP_HOST": str(payload.get("smtp_host") or "localhost").strip(),
+        "SMTP_PORT": str(payload.get("smtp_port") or "25").strip(),
+        "AKDW_EMAIL_FROM": str(payload.get("smtp_from") or "nandam@qti.qualcomm.com").strip(),
+        "SESSION_RETENTION_DAYS": str(payload.get("session_retention_days") or "30").strip(),
+        "AGENT_SHOW_THINKING": "true"
+        if str(payload.get("agent_show_thinking", "true")).lower() == "true"
+        else "false",
+        "TOKEN_WARN_THRESHOLD": str(payload.get("token_warn_threshold") or "75").strip(),
     }
 
     api_key = (payload.get("api_key") or "").strip()

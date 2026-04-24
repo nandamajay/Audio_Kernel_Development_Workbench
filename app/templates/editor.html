@@ -3,6 +3,78 @@
 
 {% block content %}
 <div class="editor-layout">
+  <style>
+    .mode-toggle-container {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .mode-pill {
+      position: relative;
+      display: flex;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 50px;
+      padding: 3px;
+      gap: 2px;
+    }
+    .pill-option {
+      position: relative;
+      z-index: 2;
+      background: transparent;
+      border: none;
+      color: rgba(255,255,255,0.45);
+      padding: 6px 18px;
+      border-radius: 50px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: color 0.25s ease;
+      white-space: nowrap;
+    }
+    .pill-option.active {
+      color: #fff;
+      font-weight: 700;
+    }
+    .pill-slider {
+      position: absolute;
+      top: 3px;
+      bottom: 3px;
+      border-radius: 50px;
+      background: linear-gradient(135deg, #7c3aed, #4f46e5);
+      box-shadow: 0 0 12px rgba(124,58,237,0.6);
+      transition: left 0.28s cubic-bezier(0.4,0,0.2,1), width 0.28s cubic-bezier(0.4,0,0.2,1);
+      z-index: 1;
+      pointer-events: none;
+    }
+    .mode-pill.agent-active .pill-slider {
+      background: linear-gradient(135deg, #059669, #10b981);
+      box-shadow: 0 0 12px rgba(16,185,129,0.6);
+    }
+    .mode-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+      transition: background 0.3s, box-shadow 0.3s;
+    }
+    .mode-dot.editor { background:#10b981; box-shadow:0 0 8px #10b981; }
+    .mode-dot.agent  { background:#7c3aed; box-shadow:0 0 8px #7c3aed; }
+    .editor-subtitle {
+      margin-left: 10px;
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+    .editor-center-wrap {
+      position: relative;
+    }
+    .editor-panel-dot {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      z-index: 5;
+    }
+  </style>
   <div class="editor-toolbar-row">
     <div class="path-switcher">
       <input id="pathInput" class="input" value="{{ kernel_path }}">
@@ -10,8 +82,15 @@
       <button id="applyPathBtn" class="btn-primary">Apply</button>
     </div>
     <div class="editor-meta">
-      <button id="editorModeBtn" class="btn-secondary mode-toggle active" data-mode="editor">EDITOR MODE</button>
-      <button id="agentModeBtn" class="btn-secondary mode-toggle agent-mode" data-mode="agent">AGENT MODE</button>
+      <div class="mode-toggle-container">
+        <div class="mode-pill" id="modePill">
+          <button class="pill-option" id="btnEditorMode" title="Standard Monaco editor - direct file editing">✏️ Editor Mode</button>
+          <button class="pill-option" id="btnAgentMode" title="QGenie Agent - AI-driven file operations">🤖 Agent Mode</button>
+          <div class="pill-slider" id="pillSlider"></div>
+        </div>
+        <span class="mode-dot" id="modeDot"></span>
+      </div>
+      <span id="pageSubtitle" class="editor-subtitle">Code Editor — ✏️ Editor Mode</span>
       <span>Current file: <strong id="currentFile">(none)</strong></span>
       <button id="saveFileBtn" class="btn-secondary">💾 Save</button>
     </div>
@@ -34,7 +113,8 @@
     </aside>
     <div id="editorHandleLeft" class="resize-handle" title="Resize panels"></div>
 
-    <section id="editorCenterPanel" class="pane pane-center">
+    <section id="editorCenterPanel" class="pane pane-center editor-center-wrap">
+      <span class="mode-dot editor editor-panel-dot" id="modeDotPanel"></span>
       <div id="editorPane" class="editor-pane"></div>
       <div id="diffPanel" class="diff-panel" style="display:none;">
         <div class="diff-toolbar">

@@ -54,6 +54,7 @@
           <span class="session-chip">Session: <span id="active-session">default</span></span>
         </div>
         <div class="topbar-right">
+          <span id="activeSessionsIndicator" class="status-chip">0 active</span>
           <span class="status-chip"><span class="status-dot"></span>QGenie Online</span>
           <a class="settings-link" href="{{ url_for('dashboard.settings_page') }}">⚙️</a>
         </div>
@@ -101,6 +102,90 @@
   </script>
   <script src="{{ url_for('static', filename='js/resizable.js') }}"></script>
   <script>
+    const AKDWSession = {
+      currentId: localStorage.getItem('akdw_current_session'),
+
+      setSession(id) {
+        this.currentId = id || null;
+        if (id) {
+          localStorage.setItem('akdw_current_session', id);
+        }
+        const sessionEl = document.getElementById('active-session');
+        if (sessionEl) sessionEl.textContent = id || 'default';
+      },
+
+      async reconnect(containerId) {
+        if (!this.currentId || !containerId) return;
+        try {
+          const res = await fetch('/api/session/' + encodeURIComponent(this.currentId));
+          if (!res.ok) return;
+          const data = await res.json();
+          const msgsRaw = data.messages || '[]';
+          let msgs = [];
+          try { msgs = JSON.parse(msgsRaw); } catch (err) { msgs = []; }
+          const box = document.getElementById(containerId);
+          if (!box) return;
+          msgs.slice(-20).forEach(function (m) {
+            if (typeof window.appendMessage === 'function') {
+              window.appendMessage(box, m.role || 'assistant', m.content || '');
+              return;
+            }
+            const row = document.createElement('div');
+            row.className = 'msg-row ' + ((m.role || '') === 'user' ? 'user' : 'assistant');
+            const bubble = document.createElement('div');
+            bubble.className = 'bubble ' + ((m.role || '') === 'user' ? 'user' : 'assistant');
+            bubble.textContent = m.content || '';
+            row.appendChild(bubble);
+            box.appendChild(row);
+          });
+        } catch (err) {
+          // ignore reconnect failures
+        }
+      },
+
+      async ping() {
+        if (!this.currentId) return;
+        try {
+          await fetch('/api/session/ping', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: this.currentId })
+          });
+        } catch (err) {
+          // ignore ping failures
+        }
+      },
+
+      startKeepalive() {
+        const self = this;
+        self.ping();
+        setInterval(function () { self.ping(); }, 30000);
+      },
+
+      async refreshActiveIndicator() {
+        const el = document.getElementById('activeSessionsIndicator');
+        if (!el) return;
+        try {
+          const res = await fetch('/api/session/active_count');
+          const data = await res.json();
+          const n = Number(data.active || 0);
+          el.textContent = n + ' active';
+        } catch (err) {
+          el.textContent = '0 active';
+        }
+      }
+    };
+    window.AKDWSession = AKDWSession;
+
+    document.addEventListener('DOMContentLoaded', function () {
+      if (AKDWSession.currentId) {
+        AKDWSession.setSession(AKDWSession.currentId);
+      }
+      AKDWSession.startKeepalive();
+      AKDWSession.refreshActiveIndicator();
+      setInterval(function () { AKDWSession.refreshActiveIndicator(); }, 20000);
+    });
+
     function copyMsg(btn) {
       var root = btn && btn.closest ? btn.closest(".ai-bubble, .msg-assistant, .chat-row.assistant") : null;
       var content = root ? root.querySelector(".msg-content") : null;

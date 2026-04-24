@@ -8,6 +8,8 @@ import re
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from typing import Any, Dict
+from urllib.parse import quote
+import xml.etree.ElementTree as ET
 
 import requests
 from bs4 import BeautifulSoup
@@ -17,6 +19,7 @@ from app.config import get_default_model
 from app.models import UpstreamPatch, db
 from app.services.activity_service import log_activity
 from app.services.env_service import resolve_ssl_verify
+from app.services.settings_service import get_json_setting, get_setting, save_setting
 
 
 upstream_bp = Blueprint("upstream", __name__)
@@ -30,6 +33,9 @@ STATUS_VALUES = {
     "superseded",
     "rejected",
 }
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+LORE_FEED = "https://lore.kernel.org/all/?q=f:{email}&x=A"
+PATCHWORK_API = "https://patchwork.kernel.org/api/patches/?submitter={email}&format=json"
 
 
 def _verify_value() -> bool | str:
@@ -84,6 +90,123 @@ def _default_submitter() -> str:
         if value and "@" in value:
             return value
     return "ajay.nandam@oss.qualcomm.com"
+
+
+def _primary_email() -> str:
+    email = (get_setting("user_email", "") or "").strip()
+    if EMAIL_RE.match(email):
+        return email
+    display = os.environ.get("USER_DISPLAY_NAME", "").strip()
+    if "@" in display and EMAIL_RE.match(display):
+        return display
+    fallback = _default_submitter()
+    return fallback if EMAIL_RE.match(fallback) else ""
+
+
+def _tracked_emails() -> list[str]:
+    emails_raw = get_json_setting("upstream_tracked_emails", [])
+    emails: list[str] = []
+    if isinstance(emails_raw, list):
+        for item in emails_raw:
+            candidate = str(item or "").strip()
+            if EMAIL_RE.match(candidate) and candidate not in emails:
+                emails.append(candidate)
+    primary = _primary_email()
+    if primary and primary not in emails:
+        emails.insert(0, primary)
+    return emails
+
+
+def _persist_tracked_emails(emails: list[str]) -> None:
+    normalized: list[str] = []
+    for item in emails:
+        candidate = str(item or "").strip()
+        if EMAIL_RE.match(candidate) and candidate not in normalized:
+            normalized.append(candidate)
+    save_setting("upstream_tracked_emails", json.dumps(normalized))
+
+
+def _dedupe_patches(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen = set()
+    deduped = []
+    for row in rows:
+        subject = str(row.get("subject", "")).strip()
+        date = str(row.get("date", "")).strip()
+        key = (subject[:80].lower(), date[:10], str(row.get("msgid", ""))[:120])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+    return deduped
+
+
+def _fetch_patchwork_by_email(email: str, verify: bool | str) -> list[dict[str, Any]]:
+    patches: list[dict[str, Any]] = []
+    try:
+        res = requests.get(
+            PATCHWORK_API.format(email=quote(email)),
+            timeout=12,
+            verify=verify,
+            headers={"User-Agent": "AKDW/1.0"},
+        )
+        if res.status_code != 200:
+            return patches
+        payload = res.json()
+        if not isinstance(payload, list):
+            return patches
+        for item in payload[:80]:
+            project = item.get("project") if isinstance(item.get("project"), dict) else {}
+            patches.append(
+                {
+                    "subject": item.get("name", ""),
+                    "date": item.get("date", ""),
+                    "list": project.get("name", ""),
+                    "state": item.get("state", "unknown"),
+                    "url": item.get("web_url", ""),
+                    "msgid": item.get("msgid", ""),
+                    "source": "patchwork",
+                }
+            )
+    except Exception:
+        return patches
+    return patches
+
+
+def _fetch_lore_by_email(email: str, verify: bool | str) -> list[dict[str, Any]]:
+    patches: list[dict[str, Any]] = []
+    try:
+        res = requests.get(
+            LORE_FEED.format(email=quote(email)),
+            timeout=12,
+            verify=verify,
+            headers={"User-Agent": "AKDW/1.0"},
+        )
+        res.raise_for_status()
+        root = ET.fromstring(res.text)
+        ns = {"atom": "http://www.w3.org/2005/Atom"}
+        entries = root.findall("atom:entry", ns)
+        for entry in entries[:60]:
+            title = (entry.findtext("atom:title", default="", namespaces=ns) or "").strip()
+            published = (entry.findtext("atom:published", default="", namespaces=ns) or "").strip()
+            msgid = (entry.findtext("atom:id", default="", namespaces=ns) or "").strip()
+            link_node = entry.find("atom:link", ns)
+            link = (link_node.get("href") if link_node is not None else "") or ""
+            category = entry.find("atom:category", ns)
+            list_name = (category.get("term") if category is not None else "") or ""
+            patches.append(
+                {
+                    "subject": title,
+                    "date": published,
+                    "list": list_name,
+                    "state": "unknown",
+                    "url": link,
+                    "msgid": msgid,
+                    "source": "lore",
+                }
+            )
+    except Exception:
+        return patches
+    return patches
 
 
 def _infer_status(text_blob: str, reply_count: int) -> str:
@@ -263,6 +386,60 @@ def upstream_stats():
         key = row.status or "submitted"
         stats[key] = stats.get(key, 0) + 1
     return jsonify(stats)
+
+
+@upstream_bp.get("/api/upstream/emails")
+def get_tracked_emails():
+    """Return list of tracked email IDs from settings."""
+    return jsonify({"emails": _tracked_emails()})
+
+
+@upstream_bp.post("/api/upstream/emails")
+def add_tracked_email():
+    """Add a tracked email and persist in settings."""
+    payload = request.get_json(silent=True) or {}
+    email = str(payload.get("email", "")).strip()
+    if not EMAIL_RE.match(email):
+        return jsonify({"error": "Invalid email"}), 400
+    emails = _tracked_emails()
+    if email not in emails:
+        emails.append(email)
+    _persist_tracked_emails(emails)
+    return jsonify({"emails": _tracked_emails(), "added": email})
+
+
+@upstream_bp.delete("/api/upstream/emails")
+def remove_tracked_email():
+    payload = request.get_json(silent=True) or {}
+    email = str(payload.get("email", "")).strip()
+    if not email:
+        return jsonify({"error": "email required"}), 400
+    emails = [item for item in _tracked_emails() if item != email]
+    _persist_tracked_emails(emails)
+    return jsonify({"emails": _tracked_emails(), "removed": email})
+
+
+@upstream_bp.get("/api/upstream/fetch")
+def fetch_patches_for_email():
+    """Fetch patches submitted by email from patchwork and lore atom feed."""
+    email = str(request.args.get("email", "")).strip()
+    if not EMAIL_RE.match(email):
+        return jsonify({"error": "email required"}), 400
+
+    verify = _verify_value()
+    patches: list[dict[str, Any]] = []
+    patches.extend(_fetch_patchwork_by_email(email, verify))
+    patches.extend(_fetch_lore_by_email(email, verify))
+    deduped = _dedupe_patches(patches)
+
+    return jsonify(
+        {
+            "email": email,
+            "patches": deduped,
+            "count": len(deduped),
+            "fetched": datetime.utcnow().isoformat(),
+        }
+    )
 
 
 @upstream_bp.post("/api/upstream/add")

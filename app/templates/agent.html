@@ -342,6 +342,82 @@
     gap: 6px;
   }
 
+  .thinking-block {
+    background: rgba(124,58,237,0.08);
+    border: 1px solid rgba(124,58,237,0.25);
+    border-radius: 10px;
+    margin: 8px 0;
+    overflow: hidden;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+  }
+
+  .think-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    cursor: pointer;
+    color: rgba(167,139,250,0.9);
+  }
+
+  .think-spinner {
+    display: inline-block;
+    animation: spin 1s linear infinite;
+  }
+
+  .think-steps {
+    padding: 4px 14px 10px;
+  }
+
+  .think-step-item {
+    display: flex;
+    gap: 8px;
+    color: rgba(255,255,255,0.72);
+    border-left: 2px solid rgba(124,58,237,0.3);
+    padding: 4px 0 4px 10px;
+    margin-left: 4px;
+  }
+
+  .step-num {
+    color: rgba(124,58,237,0.8);
+    min-width: 18px;
+  }
+
+  .thinking-block.collapsed .think-steps {
+    display: none;
+  }
+
+  .response-with-token {
+    display: grid;
+    gap: 6px;
+  }
+
+  .token-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    font-size: 11px;
+    color: rgba(255,255,255,0.55);
+    border-top: 1px solid rgba(255,255,255,0.08);
+  }
+
+  .token-bar {
+    flex: 1;
+    height: 4px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .token-fill {
+    height: 100%;
+    background: linear-gradient(90deg,#10b981,#f59e0b,#ef4444);
+    border-radius: 2px;
+    transition: width 0.4s ease;
+  }
+
   @media (max-width: 1100px) {
     .chat-shell {
       flex-direction: column;
@@ -546,6 +622,9 @@
     }
 
     sessionId = nextSessionId;
+    if (window.AKDWSession && typeof window.AKDWSession.setSession === 'function') {
+      window.AKDWSession.setSession(sessionId);
+    }
     selectedHistorySessionId = null;
     replayMode = false;
     waiting = false;
@@ -560,6 +639,36 @@
     renderAttachPills();
     updateTokenBudget(0, 131072);
     document.getElementById('agentInput').focus();
+  }
+
+  async function loadSessionMessages(id, asReplay) {
+    sessionId = id;
+    selectedHistorySessionId = id;
+    if (window.AKDWSession && typeof window.AKDWSession.setSession === 'function') {
+      window.AKDWSession.setSession(id);
+    }
+    document.getElementById('agentSessionLabel').textContent = id;
+    document.getElementById('messages-area').innerHTML = '';
+    const res = await fetch('/api/session/' + encodeURIComponent(id));
+    if (!res.ok) {
+      if (asReplay) setReplayMode(true);
+      return;
+    }
+    const data = await res.json();
+    let messages = [];
+    try {
+      messages = JSON.parse(data.messages || '[]');
+    } catch (err) {
+      messages = [];
+    }
+    messages.forEach(function (msg) {
+      if (msg.role === 'user') {
+        appendBubble('user', msg.content || '', false);
+      } else if ((msg.step_type || 'response') === 'response') {
+        appendBubble('assistant', msg.content || '', true);
+      }
+    });
+    setReplayMode(!!asReplay);
   }
 
   function setSendWaiting(enabled) {
@@ -616,6 +725,93 @@
     document.getElementById('messages-area').appendChild(row);
     scrollToBottom();
     return row.id;
+  }
+
+  function toggleThink(headerEl) {
+    const block = headerEl && headerEl.closest ? headerEl.closest('.thinking-block') : null;
+    if (!block) return;
+    block.classList.toggle('collapsed');
+  }
+  window.toggleThink = toggleThink;
+
+  function createThinkingBlock() {
+    const row = document.createElement('div');
+    row.className = 'msg-row assistant';
+    const block = document.createElement('div');
+    block.className = 'thinking-block';
+    block.innerHTML = [
+      '<div class="think-header">',
+      '  <span class="think-spinner">◌</span>',
+      '  <span class="think-label">▶ THINKING</span>',
+      '  <span class="think-time">0.0s</span>',
+      '</div>',
+      '<div class="think-steps"></div>'
+    ].join('');
+    const start = Date.now();
+    const timer = setInterval(function () {
+      const timerEl = block.querySelector('.think-time');
+      if (timerEl) timerEl.textContent = ((Date.now() - start) / 1000).toFixed(1) + 's';
+    }, 100);
+    block._timer = timer;
+    const header = block.querySelector('.think-header');
+    if (header) {
+      header.addEventListener('click', function () { toggleThink(header); });
+    }
+    row.appendChild(block);
+    document.getElementById('messages-area').appendChild(row);
+    scrollToBottom();
+    return block;
+  }
+
+  function addThinkStep(block, stepText, idx) {
+    if (!block) return;
+    const steps = block.querySelector('.think-steps');
+    if (!steps) return;
+    const item = document.createElement('div');
+    item.className = 'think-step-item';
+    item.innerHTML = '<span class="step-num">' + idx + '</span><span class="step-text">' + escapeHtml(stepText || '') + '</span>';
+    steps.appendChild(item);
+  }
+
+  function finalizeThinkBlock(block, isError) {
+    if (!block) return;
+    if (block._timer) clearInterval(block._timer);
+    const spinner = block.querySelector('.think-spinner');
+    const label = block.querySelector('.think-label');
+    const count = block.querySelectorAll('.think-step-item').length;
+    if (spinner) spinner.textContent = isError ? '⚠' : '✓';
+    if (label) label.textContent = '▶ THINKING [' + count + ' steps]';
+    block.classList.add('collapsed');
+  }
+
+  function appendFinalResponse(content, tokens) {
+    const row = document.createElement('div');
+    row.className = 'msg-row assistant';
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble assistant ai-bubble response-with-token';
+    const used = Number(tokens && tokens.used || 0) || 0;
+    const limit = Number(tokens && tokens.limit || 131072) || 131072;
+    const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
+    bubble.innerHTML =
+      '<button class="copy-btn" type="button" title="Copy response">📋</button>' +
+      '<div class="msg-content">' + renderAssistantHtml(content || '') + '</div>' +
+      '<div class="token-footer">Tokens: ' + used.toLocaleString() + ' / ' + limit.toLocaleString() +
+      '<div class="token-bar"><div class="token-fill" style="width:' + pct.toFixed(1) + '%"></div></div>' +
+      '<span>' + pct.toFixed(1) + '% context used</span></div>';
+    const copyBtn = bubble.querySelector('.copy-btn');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', function () { copyMsg(copyBtn); });
+    }
+    const contentEl = bubble.querySelector('.msg-content');
+    if (contentEl) decorateCodeBlocks(contentEl);
+    const stamp = document.createElement('span');
+    stamp.className = 'bubble-time';
+    stamp.textContent = nowStamp();
+    bubble.appendChild(stamp);
+    row.appendChild(bubble);
+    document.getElementById('messages-area').appendChild(row);
+    scrollToBottom();
+    updateTokenBudget(used, limit);
   }
 
   function decorateCodeBlocks(container) {
@@ -697,11 +893,12 @@
     input.value = '';
     autoResizeInput();
 
-    const thinkingId = appendThinkingBubble();
+    const thinkBlock = createThinkingBlock();
+    let stepIdx = 0;
     setSendWaiting(true);
 
     try {
-      const res = await fetch('/api/agent/chat', {
+      const res = await fetch('/api/agent/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -712,18 +909,61 @@
           attachments: attached,
         }),
       });
-      const data = await res.json();
-      const responseText = (data.response || data.content || data.message || '').trim();
-      (data.notices || []).forEach(function (notice) {
-        appendBubble('warning', notice, true);
-      });
-      replaceThinkingBubble(thinkingId, responseText);
-      updateTokenBudget(data.token_usage_estimate || 0, data.token_usage_max || 131072);
+      if (!res.ok || !res.body) {
+        throw new Error('Stream request failed');
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let responseSeen = false;
+
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        buffer += decoder.decode(chunk.value, { stream: true });
+        const events = buffer.split('\n\n');
+        buffer = events.pop() || '';
+
+        events.forEach(function (evtRaw) {
+          const line = evtRaw.split('\n').find(function (ln) { return ln.startsWith('data:'); });
+          if (!line) return;
+          const raw = line.slice(5).trim();
+          if (!raw) return;
+          if (raw === '[DONE]') {
+            finalizeThinkBlock(thinkBlock, false);
+            return;
+          }
+          try {
+            const evt = JSON.parse(raw);
+            if (evt.type === 'thinking') {
+              addThinkStep(thinkBlock, evt.step || '...', ++stepIdx);
+              scrollToBottom();
+            } else if (evt.type === 'response') {
+              finalizeThinkBlock(thinkBlock, false);
+              appendFinalResponse(evt.content || '', evt.tokens || null);
+              responseSeen = true;
+            } else if (evt.type === 'error') {
+              finalizeThinkBlock(thinkBlock, true);
+              addThinkStep(thinkBlock, 'Error: ' + (evt.content || 'stream failed'), ++stepIdx);
+              if (!responseSeen) appendBubble('warning', '⚠️ ' + (evt.content || 'Request failed. Please retry.'), true);
+            }
+          } catch (err) {
+            // Ignore partial chunks.
+          }
+        });
+      }
+
+      if (!responseSeen) {
+        appendBubble('warning', '⚠️ Request failed. Please retry.', true);
+      }
       attached = [];
       renderAttachPills();
       loadHistorySidebar();
     } catch (err) {
-      replaceThinkingBubble(thinkingId, '⚠️ Request failed. Please retry.');
+      finalizeThinkBlock(thinkBlock, true);
+      addThinkStep(thinkBlock, 'Error: request failed', ++stepIdx);
+      appendBubble('warning', '⚠️ Request failed. Please retry.', true);
     } finally {
       setSendWaiting(false);
       input.focus();
@@ -741,13 +981,19 @@
   }
 
   async function loadHistorySidebar() {
-    const res = await fetch('/agent/sessions');
+    const res = await fetch('/api/session/list');
     const data = await res.json();
-    const grouped = data.grouped || {};
+    const sessions = data.sessions || [];
+    const grouped = { patchwise: [], agent: [], triage: [], converter: [], editor: [] };
+    sessions.forEach(function (row) {
+      const key = (row.page || 'agent').toLowerCase();
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(row);
+    });
     const root = document.getElementById('historySidebar');
     root.innerHTML = '';
 
-    ['patchwise', 'agent', 'triage', 'converter'].forEach(function (page) {
+    ['patchwise', 'agent', 'triage', 'converter', 'editor'].forEach(function (page) {
       const group = document.createElement('div');
       group.className = 'session-group';
       const title = document.createElement('h4');
@@ -756,36 +1002,66 @@
 
       const rows = grouped[page] || [];
       rows.forEach(function (item) {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'session-item';
-        btn.textContent = item.name;
-        btn.addEventListener('click', function () {
-          openHistorySession(item.id);
-        });
-        group.appendChild(btn);
+        const wrap = document.createElement('div');
+        wrap.className = 'session-item';
+        const badge = item.status === 'active' ? '🟢 Active' : (item.status === 'archived' ? '⚫ Archived' : '🔵 Replay');
+        const ts = (item.updated_at || '').replace('T', ' ').slice(0, 16);
+        wrap.innerHTML =
+          '<div style="display:flex;justify-content:space-between;gap:8px;"><strong data-rename="' + item.id + '" style="cursor:text;" title="Double-click to rename">' + (item.name || item.id) + '</strong><span>' + badge + '</span></div>' +
+          '<div class="small-muted">' + (item.last_preview || 'No messages yet') + '</div>' +
+          '<div style="display:flex;justify-content:space-between;gap:8px;margin-top:6px;">' +
+          '<span class="small-muted">' + ts + ' · ' + (item.message_count || 0) + ' msgs</span>' +
+          '<span>' +
+          '<button type="button" class="btn-secondary" data-replay="' + item.id + '" style="padding:2px 6px;font-size:11px;">▶ Replay</button> ' +
+          '<button type="button" class="btn-secondary" data-continue="' + item.id + '" style="padding:2px 6px;font-size:11px;">↩ Continue</button>' +
+          '<button type="button" class="btn-secondary" data-delete="' + item.id + '" style="padding:2px 6px;font-size:11px;">🗑</button>' +
+          '</span></div>';
+        group.appendChild(wrap);
       });
 
       root.appendChild(group);
     });
+
+    root.querySelectorAll('[data-replay]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const sid = btn.getAttribute('data-replay');
+        openHistorySession(sid);
+      });
+    });
+    root.querySelectorAll('[data-continue]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const sid = btn.getAttribute('data-continue');
+        selectedHistorySessionId = sid;
+        continueSession();
+      });
+    });
+    root.querySelectorAll('[data-delete]').forEach(function (btn) {
+      btn.addEventListener('click', async function () {
+        const sid = btn.getAttribute('data-delete');
+        await fetch('/api/session/' + encodeURIComponent(sid), { method: 'DELETE' });
+        if (sessionId === sid) {
+          createFreshSession();
+        }
+        loadHistorySidebar();
+      });
+    });
+    root.querySelectorAll('[data-rename]').forEach(function (titleEl) {
+      titleEl.addEventListener('dblclick', async function () {
+        const sid = titleEl.getAttribute('data-rename');
+        const next = window.prompt('Rename session', titleEl.textContent || '');
+        if (next === null || !next.trim()) return;
+        await fetch('/api/session/' + encodeURIComponent(sid) + '/rename', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: next.trim() })
+        });
+        loadHistorySidebar();
+      });
+    });
   }
 
   async function openHistorySession(id) {
-    selectedHistorySessionId = id;
-    sessionId = id;
-    document.getElementById('agentSessionLabel').textContent = id;
-    document.getElementById('messages-area').innerHTML = '';
-    setReplayMode(true);
-
-    const res = await fetch('/agent/sessions/' + encodeURIComponent(id) + '/messages');
-    const data = await res.json();
-    (data.messages || []).forEach(function (msg) {
-      if (msg.role === 'user') {
-        appendBubble('user', msg.content || '', false);
-      } else if (msg.step_type === 'response' || !msg.step_type) {
-        appendBubble('assistant', msg.content || '', true);
-      }
-    });
+    await loadSessionMessages(id, true);
     scrollToBottom();
   }
 
@@ -795,6 +1071,9 @@
       method: 'POST',
     });
     sessionId = selectedHistorySessionId;
+    if (window.AKDWSession && typeof window.AKDWSession.setSession === 'function') {
+      window.AKDWSession.setSession(sessionId);
+    }
     setReplayMode(false);
     document.getElementById('agentInput').focus();
   }
@@ -854,8 +1133,13 @@
         { handleId: 'agentResizeHandle', leftPanelId: 'agentSidebarPanel', rightPanelId: 'agentMainPanel' },
       ]);
     }
-    createFreshSession();
     loadHistorySidebar();
+    const persisted = window.AKDWSession ? window.AKDWSession.currentId : null;
+    if (persisted) {
+      loadSessionMessages(persisted, false).catch(function () { createFreshSession(); });
+    } else {
+      createFreshSession();
+    }
     autoResizeInput();
   });
 })();

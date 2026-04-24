@@ -67,6 +67,90 @@
     gap: 8px;
   }
 
+  .upstream-email-bar {
+    display: grid;
+    gap: 8px;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    background: rgba(255,255,255,0.03);
+    padding: 12px;
+  }
+
+  .email-select-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .email-select-chip {
+    border: 1px solid var(--glass-border);
+    border-radius: 999px;
+    background: rgba(255,255,255,0.05);
+    color: var(--text-primary);
+    font-size: 12px;
+    padding: 4px 10px;
+    cursor: pointer;
+  }
+
+  .email-select-chip.active {
+    border-color: var(--accent-blue);
+    box-shadow: var(--shadow-glow);
+  }
+
+  .quick-add-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+  }
+
+  .patches-table-container {
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    overflow: hidden;
+    background: rgba(255,255,255,0.02);
+  }
+
+  .patches-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .patches-table th,
+  .patches-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .patch-subject {
+    max-width: 500px;
+  }
+
+  .patch-badge {
+    border: 1px solid var(--glass-border);
+    border-radius: 999px;
+    padding: 3px 8px;
+    white-space: nowrap;
+  }
+
+  .source-tag {
+    border: 1px solid var(--glass-border);
+    border-radius: 999px;
+    font-size: 11px;
+    padding: 2px 6px;
+  }
+
+  .source-patchwork { color: #93c5fd; }
+  .source-lore { color: #d8b4fe; }
+
+  .fetch-meta {
+    padding: 8px 10px;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
   .upstream-list {
     display: grid;
     gap: 10px;
@@ -173,6 +257,38 @@
     </div>
   </div>
 
+  <div class="upstream-email-bar">
+    <label>👤 Tracking patches for:</label>
+    <div class="email-select-chips" id="upstreamEmailChips"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn-secondary btn-add-email-inline" type="button" onclick="document.getElementById('quickAddEmail').style.display='grid'">+ Add Email</button>
+      <button class="btn-secondary" type="button" onclick="refreshSelectedEmail()">🔄 Refresh Selected</button>
+    </div>
+    <div id="quickAddEmail" class="quick-add-row" style="display:none;">
+      <input type="email" id="quickEmailInput" class="input" placeholder="Add email to track...">
+      <button class="btn-primary" type="button" onclick="quickAddAndFetch()">Fetch & Track</button>
+    </div>
+  </div>
+
+  <div class="patches-table-container" id="patchesTableContainer">
+    <table class="patches-table">
+      <thead>
+        <tr>
+          <th>Subject</th>
+          <th>Date</th>
+          <th>Mailing List</th>
+          <th>Status</th>
+          <th>Source</th>
+          <th>Link</th>
+        </tr>
+      </thead>
+      <tbody id="patchesTableBody">
+        <tr><td colspan="6">Select an email to fetch patches.</td></tr>
+      </tbody>
+    </table>
+    <div class="fetch-meta" id="fetchMeta"></div>
+  </div>
+
   <div id="statusSummary" class="status-summary"></div>
 
   <div class="upstream-tools">
@@ -210,9 +326,34 @@
 (function () {
   let patches = [];
   let activeFilter = "all";
+  let selectedTrackedEmail = "";
+
+  const STATE_BADGES = {
+    accepted: "🟢 APPLIED",
+    applied: "🟢 APPLIED",
+    merged: "🟢 APPLIED",
+    superseded: "🔵 SUPERSEDED",
+    reviewed: "🔵 REVIEWED",
+    new: "🟡 PENDING",
+    submitted: "🟡 PENDING",
+    under_review: "🟡 REVIEWING",
+    "under-review": "🟡 REVIEWING",
+    rejected: "🔴 REJECTED",
+    deferred: "🟠 DEFERRED",
+    unknown: "⚫ UNKNOWN"
+  };
 
   function fmtStatus(status) {
     return (status || "submitted").replace(/_/g, " ");
+  }
+
+  function escapeHtml(text) {
+    return String(text || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   function statusClass(status) {
@@ -287,6 +428,99 @@
     }
     list.innerHTML = rows.map(cardTemplate).join("");
   }
+
+  function renderEmailChips(emails) {
+    const chips = document.getElementById('upstreamEmailChips');
+    chips.innerHTML = '';
+    (emails || []).forEach(function (email, idx) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'email-select-chip' + ((email === selectedTrackedEmail || (!selectedTrackedEmail && idx === 0)) ? ' active' : '');
+      chip.textContent = email;
+      chip.addEventListener('click', function () {
+        selectedTrackedEmail = email;
+        renderEmailChips(emails);
+        fetchPatchesForEmail(email);
+      });
+      chips.appendChild(chip);
+    });
+  }
+
+  async function fetchPatchesForEmail(email) {
+    const tbody = document.getElementById('patchesTableBody');
+    const meta = document.getElementById('fetchMeta');
+    tbody.innerHTML = '<tr><td colspan="6">⏳ Fetching patches...</td></tr>';
+    meta.textContent = '';
+    try {
+      const res = await fetch('/api/upstream/fetch?email=' + encodeURIComponent(email));
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Fetch failed');
+      const rows = data.patches || [];
+      tbody.innerHTML = '';
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="6">No patches found for this email</td></tr>';
+      } else {
+        rows.forEach(function (p) {
+          const state = String((p.state || 'unknown')).toLowerCase();
+          const badge = STATE_BADGES[state] || '⚫ UNKNOWN';
+          const date = String(p.date || '').slice(0, 10) || '—';
+          const subject = String(p.subject || '');
+          const tr = document.createElement('tr');
+          tr.innerHTML =
+            '<td class="patch-subject" title="' + escapeHtml(subject) + '">' + escapeHtml(subject.slice(0, 70)) + (subject.length > 70 ? '…' : '') + '</td>' +
+            '<td>' + escapeHtml(date) + '</td>' +
+            '<td>' + escapeHtml(p.list || '—') + '</td>' +
+            '<td><span class="patch-badge">' + badge + '</span></td>' +
+            '<td><span class="source-tag source-' + escapeHtml(p.source || 'lore') + '">' + escapeHtml(p.source || 'lore') + '</span></td>' +
+            '<td>' + (p.url ? '<a href="' + escapeHtml(p.url) + '" target="_blank" rel="noopener noreferrer">🔗 View</a>' : '—') + '</td>';
+          tbody.appendChild(tr);
+        });
+      }
+      meta.textContent =
+        'Showing ' + Number(data.count || 0) + ' patches for ' + email +
+        ' — Last fetched: ' + String(data.fetched || '').slice(0, 19) + ' UTC';
+    } catch (err) {
+      tbody.innerHTML = '<tr><td colspan="6">Failed to fetch patches for this email.</td></tr>';
+    }
+  }
+
+  async function initUpstreamTracker() {
+    try {
+      const res = await fetch('/api/upstream/emails');
+      const data = await res.json();
+      const emails = data.emails || [];
+      if (emails.length) {
+        selectedTrackedEmail = selectedTrackedEmail || emails[0];
+      }
+      renderEmailChips(emails);
+      if (selectedTrackedEmail) {
+        fetchPatchesForEmail(selectedTrackedEmail);
+      }
+    } catch (err) {
+      renderEmailChips([]);
+    }
+  }
+
+  window.quickAddAndFetch = async function () {
+    const input = document.getElementById('quickEmailInput');
+    const email = (input.value || '').trim();
+    if (!email) return;
+    const res = await fetch('/api/upstream/emails', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email })
+    });
+    const data = await res.json();
+    if (!res.ok) return;
+    input.value = '';
+    selectedTrackedEmail = email;
+    renderEmailChips(data.emails || []);
+    fetchPatchesForEmail(email);
+  };
+
+  window.refreshSelectedEmail = function () {
+    if (selectedTrackedEmail) fetchPatchesForEmail(selectedTrackedEmail);
+  };
 
   async function loadStats() {
     const res = await fetch("/api/upstream/stats");
@@ -402,6 +636,7 @@
   };
 
   document.getElementById("sortOrder").addEventListener("change", renderList);
+  initUpstreamTracker();
   loadStats();
   loadList();
 })();

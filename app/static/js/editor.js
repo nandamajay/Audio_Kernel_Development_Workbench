@@ -40,6 +40,56 @@ window.AKDWEditor = (function () {
     if (topbarLabel) topbarLabel.textContent = value || "unknown";
   }
 
+  function setSubtitle(mode) {
+    const subtitle = document.getElementById("pageSubtitle");
+    if (!subtitle) return;
+    subtitle.textContent =
+      mode === "agent"
+        ? "Code Editor — 🤖 Agent Mode"
+        : "Code Editor — ✏️ Editor Mode";
+  }
+
+  function applyModeUi(mode) {
+    const pill = document.getElementById("modePill");
+    const dot = document.getElementById("modeDot");
+    const dotPanel = document.getElementById("modeDotPanel");
+    const slider = document.getElementById("pillSlider");
+    const btnEditor = document.getElementById("btnEditorMode");
+    const btnAgent = document.getElementById("btnAgentMode");
+    const editorPanel = document.getElementById("editorCenterPanel");
+    const agentPanel = document.getElementById("editorRightPanel");
+    const rightHandle = document.getElementById("editorHandleRight");
+
+    if (!btnEditor || !btnAgent || !slider) return;
+
+    editorMode = mode === "agent" ? "agent" : "editor";
+    localStorage.setItem("akdw_editor_mode", editorMode);
+
+    btnEditor.classList.toggle("active", editorMode === "editor");
+    btnAgent.classList.toggle("active", editorMode === "agent");
+    if (pill) {
+      pill.classList.toggle("agent-active", editorMode === "agent");
+    }
+
+    const activeBtn = editorMode === "editor" ? btnEditor : btnAgent;
+    slider.style.left = activeBtn.offsetLeft + "px";
+    slider.style.width = activeBtn.offsetWidth + "px";
+
+    const dotCls = "mode-dot " + editorMode;
+    if (dot) dot.className = dotCls;
+    if (dotPanel) dotPanel.className = dotCls + " editor-panel-dot";
+
+    setSubtitle(editorMode);
+
+    if (editorPanel && agentPanel) {
+      editorPanel.style.display = editorMode === "editor" ? "block" : "none";
+      agentPanel.style.display = editorMode === "agent" ? "grid" : "none";
+      if (rightHandle) {
+        rightHandle.style.display = editorMode === "agent" ? "block" : "none";
+      }
+    }
+  }
+
   async function ensureTerminalSession() {
     if (terminalSessionId) return terminalSessionId;
     const res = await fetch("/api/terminal/session", {
@@ -277,7 +327,25 @@ window.AKDWEditor = (function () {
   }
 
   async function ensureEditorSession() {
-    if (sessionId) return sessionId;
+    if (sessionId) {
+      setSessionLabel(sessionId);
+      if (window.AKDWSession && typeof window.AKDWSession.setSession === "function") {
+        window.AKDWSession.setSession(sessionId);
+      }
+      if (socket) {
+        socket.emit("join_agent_session", { session_id: sessionId });
+      }
+      return sessionId;
+    }
+    const persisted = localStorage.getItem("akdw_editor_session");
+    if (persisted) {
+      sessionId = persisted;
+      setSessionLabel(sessionId);
+      if (window.AKDWSession && typeof window.AKDWSession.setSession === "function") {
+        window.AKDWSession.setSession(sessionId);
+      }
+      return sessionId;
+    }
     const res = await fetch("/api/agent/new_session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -287,6 +355,9 @@ window.AKDWEditor = (function () {
     sessionId = data.session_id;
     localStorage.setItem("akdw_editor_session", sessionId);
     setSessionLabel(sessionId);
+    if (window.AKDWSession && typeof window.AKDWSession.setSession === "function") {
+      window.AKDWSession.setSession(sessionId);
+    }
     if (socket) {
       socket.emit("join_agent_session", { session_id: sessionId });
     }
@@ -517,6 +588,7 @@ window.AKDWEditor = (function () {
   }
 
   async function init(opts) {
+    sessionId = localStorage.getItem("akdw_editor_session") || null;
     activeModel = localStorage.getItem("akdw_editor_model") || opts.defaultModel;
     document.getElementById("modelSelect").value = activeModel;
     setSessionLabel("initializing...");
@@ -595,20 +667,21 @@ window.AKDWEditor = (function () {
     sessionPrimed = false;
     await primeEditorContext();
 
-    const editorModeBtn = document.getElementById("editorModeBtn");
-    const agentModeBtn = document.getElementById("agentModeBtn");
-    if (editorModeBtn && agentModeBtn) {
-      editorModeBtn.addEventListener("click", function () {
-        editorMode = "editor";
-        editorModeBtn.classList.add("active");
-        agentModeBtn.classList.remove("active");
+    const btnEditor = document.getElementById("btnEditorMode");
+    const btnAgent = document.getElementById("btnAgentMode");
+    if (btnEditor && btnAgent) {
+      btnEditor.addEventListener("click", function () {
+        applyModeUi("editor");
         setStatus("Switched to EDITOR mode");
       });
-      agentModeBtn.addEventListener("click", function () {
-        editorMode = "agent";
-        agentModeBtn.classList.add("active");
-        editorModeBtn.classList.remove("active");
+      btnAgent.addEventListener("click", function () {
+        applyModeUi("agent");
         setStatus("Switched to AGENT mode");
+      });
+      const savedMode = localStorage.getItem("akdw_editor_mode") || "editor";
+      applyModeUi(savedMode);
+      window.addEventListener("resize", function () {
+        applyModeUi(editorMode);
       });
     }
   }
