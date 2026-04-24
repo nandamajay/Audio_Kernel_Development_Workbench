@@ -26,6 +26,12 @@ def agent_home():
     )
 
 
+@agent_bp.get("/history")
+@agent_bp.get("/history/")
+def agent_history():
+    return render_template("agent_history.html")
+
+
 @agent_bp.post("/chat")
 def agent_chat():
     payload = request.get_json() or {}

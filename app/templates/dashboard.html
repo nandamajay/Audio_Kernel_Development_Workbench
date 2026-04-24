@@ -1,6 +1,60 @@
 {% extends "base.html" %}
 
 {% block title %}Dashboard{% endblock %}
+{% block head %}
+{{ super() }}
+<style>
+  .activity-item {
+    position: relative;
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    padding: 8px 10px;
+    transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+  }
+
+  .activity-item.clickable {
+    cursor: pointer;
+  }
+
+  .activity-item.clickable:hover {
+    background: var(--glass-bg);
+    border-color: rgba(59, 130, 246, 0.32);
+    transform: translateY(-1px);
+  }
+
+  .activity-item.clickable:focus-visible {
+    outline: none;
+    border-color: rgba(59, 130, 246, 0.46);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.16);
+  }
+
+  .activity-open-badge {
+    display: none;
+    opacity: 0;
+    border: 1px solid rgba(59, 130, 246, 0.38);
+    border-radius: 999px;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 8px;
+    font-size: 10px;
+    color: #cde0ff;
+    background: rgba(59, 130, 246, 0.16);
+    transition: opacity 0.18s ease;
+  }
+
+  .activity-item.clickable .activity-open-badge {
+    display: inline-flex;
+  }
+
+  .activity-item.clickable:hover .activity-open-badge {
+    opacity: 1;
+  }
+</style>
+{% endblock %}
 
 {% block content %}
 <div class="dashboard-wrap premium-dashboard dashboard-v6 glassmorphism">
@@ -87,7 +141,7 @@
     <article class="panel premium-panel patch-health">
       <div class="panel-head">
         <h3>📋 Recent Activity</h3>
-        <a href="{{ url_for('patchwise.patchwise_home') }}" class="panel-link">View All</a>
+        <a href="{{ url_for('agent.agent_history') }}" class="panel-link">View All</a>
       </div>
       <ul class="activity-list premium-activity-list" id="recentActivityList">
         <li><span class="activity-dot"></span><span class="activity-label">Loading activity...</span><time>now</time></li>
@@ -171,13 +225,62 @@
       list.innerHTML = '<li><span class="activity-dot"></span><span class="activity-label">No activity yet</span><time>now</time></li>';
       return;
     }
-    list.innerHTML = data.map(item => (
-      '<li>'
-      + '<span class="activity-dot"></span>'
-      + '<span class="activity-label">' + activityIcon(item.type) + ' ' + (item.desc || "Activity") + '</span>'
-      + '<time>' + (item.time || "now") + '</time>'
-      + '</li>'
-    )).join("");
+
+    function esc(s) {
+      return String(s || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    list.innerHTML = data.map(item => {
+      const sessionId = item.session_id || "";
+      const clickable = !!(sessionId || item.open_url);
+      const attrs = clickable ? ' role="button" tabindex="0"' : '';
+      const badge = clickable ? '<span class="activity-open-badge">↗ Resume</span>' : '';
+      return (
+        '<li class="activity-item ' + (clickable ? 'clickable' : '') + '"' +
+        attrs +
+        ' data-session-id="' + esc(sessionId) + '"' +
+        ' data-open-url="' + esc(item.open_url || '') + '"' +
+        ' data-preview="' + esc(item.preview_text || item.desc || '') + '"' +
+        ' data-ts="' + esc(item.timestamp || '') + '">' +
+        '<span class="activity-dot"></span>' +
+        '<span class="activity-label">' + activityIcon(item.type) + ' ' + esc(item.desc || "Activity") + '</span>' +
+        '<time>' + esc(item.time || "now") + '</time>' +
+        badge +
+        '</li>'
+      );
+    }).join("");
+
+    list.querySelectorAll(".activity-item.clickable").forEach((row) => {
+      row.addEventListener("click", () => {
+        const sid = row.getAttribute("data-session-id") || "";
+        const openUrl = row.getAttribute("data-open-url") || "";
+        const preview = row.getAttribute("data-preview") || "";
+        const ts = row.getAttribute("data-ts") || "";
+        if (sid) {
+          const params = new URLSearchParams({
+            session_id: sid,
+            resumed_at: ts,
+            resume_preview: preview,
+          });
+          window.location.href = "/agent/?" + params.toString();
+          return;
+        }
+        if (openUrl) {
+          window.location.href = openUrl;
+        }
+      });
+      row.addEventListener("keydown", (evt) => {
+        if (evt.key === "Enter" || evt.key === " ") {
+          evt.preventDefault();
+          row.click();
+        }
+      });
+    });
   }
 
   async function loadPatchHealth() {

@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}Session History{% endblock %}
+
+{% block head %}
+<style>
+  .history-shell {
+    display: grid;
+    gap: 12px;
+  }
+
+  .history-head,
+  .history-tools,
+  .history-table-wrap {
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    background: var(--glass-bg);
+    padding: 12px;
+  }
+
+  .history-head h2 {
+    margin: 0;
+  }
+
+  .history-tools {
+    display: grid;
+    grid-template-columns: 1fr 220px auto;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .history-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .history-table th,
+  .history-table td {
+    text-align: left;
+    padding: 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    vertical-align: top;
+  }
+
+  .history-table tr:hover {
+    background: rgba(59,130,246,0.09);
+  }
+
+  .hist-preview {
+    max-width: 520px;
+    color: var(--text-muted);
+  }
+
+  @media (max-width: 980px) {
+    .history-tools {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="history-shell">
+  <div class="history-head">
+    <h2>📂 Multi-Session History</h2>
+    <div class="small-muted">Search/filter and resume any previous AKDW session.</div>
+  </div>
+
+  <div class="history-tools">
+    <input id="historySearch" class="input" placeholder="Search by session, preview, page...">
+    <input id="historyDate" class="input" type="date">
+    <button id="historyRefresh" class="btn-secondary" type="button">Refresh</button>
+  </div>
+
+  <div class="history-table-wrap">
+    <table class="history-table">
+      <thead>
+        <tr>
+          <th>Session</th>
+          <th>Module</th>
+          <th>Status</th>
+          <th>Preview</th>
+          <th>Updated</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="historyRows">
+        <tr><td colspan="6">Loading sessions...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  let rows = [];
+
+  function esc(s) {
+    return String(s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function applyFilters() {
+    const q = (document.getElementById("historySearch").value || "").toLowerCase().trim();
+    const d = (document.getElementById("historyDate").value || "").trim();
+    const out = rows.filter((r) => {
+      const hitText = [r.id, r.name, r.page, r.last_preview, r.status].join(" ").toLowerCase();
+      if (q && !hitText.includes(q)) return false;
+      if (d && String(r.updated_at || "").slice(0, 10) !== d) return false;
+      return true;
+    });
+    render(out);
+  }
+
+  function render(data) {
+    const body = document.getElementById("historyRows");
+    if (!data.length) {
+      body.innerHTML = '<tr><td colspan="6">No sessions match your filters.</td></tr>';
+      return;
+    }
+    body.innerHTML = data.map((r) => {
+      const params = new URLSearchParams({
+        session_id: r.id || "",
+        resumed_at: r.updated_at || "",
+        resume_preview: r.last_preview || ""
+      }).toString();
+      return (
+        '<tr>' +
+        '<td><strong>' + esc(r.name || r.id) + '</strong><div class="small-muted">' + esc(r.id || "") + '</div></td>' +
+        '<td>' + esc(r.page || "agent") + '</td>' +
+        '<td>' + esc(r.status || "active") + '</td>' +
+        '<td class="hist-preview">' + esc(r.last_preview || "") + '</td>' +
+        '<td>' + esc(String(r.updated_at || "").replace("T", " ").slice(0, 16)) + '</td>' +
+        '<td>' +
+        '<a class="btn-secondary" href="/agent/?' + params + '">↗ Resume</a> ' +
+        '<button class="btn-secondary" type="button" data-del="' + esc(r.id || "") + '">🗑 Delete</button>' +
+        '</td>' +
+        '</tr>'
+      );
+    }).join("");
+
+    body.querySelectorAll("[data-del]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const sid = btn.getAttribute("data-del");
+        if (!sid) return;
+        await fetch("/api/session/" + encodeURIComponent(sid), { method: "DELETE" });
+        await load();
+      });
+    });
+  }
+
+  async function load() {
+    const res = await fetch("/api/session/list");
+    const data = await res.json();
+    rows = Array.isArray(data.sessions) ? data.sessions : [];
+    rows.sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
+    applyFilters();
+  }
+
+  document.getElementById("historySearch").addEventListener("input", applyFilters);
+  document.getElementById("historyDate").addEventListener("change", applyFilters);
+  document.getElementById("historyRefresh").addEventListener("click", load);
+  load();
+})();
+</script>
+{% endblock %}

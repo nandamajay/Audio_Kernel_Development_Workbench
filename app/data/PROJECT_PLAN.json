@@ -74,6 +74,22 @@
           "description": "Deploy Designer+Architect pipeline to production"
         }
       ]
+    },
+    {
+      "id": 5,
+      "name": "Enhancement Execution Sprint",
+      "status": "PLANNED",
+      "tasks": [
+        {
+          "id": "5.1",
+          "name": "Architect Hardening Sweep",
+          "status": "PENDING",
+          "assigned_to": "Designer",
+          "description": "Run one hardening cycle across dual-agent orchestration and UI stability.",
+          "priority": "MEDIUM"
+        }
+      ],
+      "auto_generated": true
     }
   ],
   "enhancement_backlog": [],

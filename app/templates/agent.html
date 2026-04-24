@@ -100,6 +100,17 @@
     display: none;
   }
 
+  .resume-banner {
+    margin: 10px 10px 0;
+    border: 1px solid rgba(59,130,246,0.45);
+    background: rgba(59,130,246,0.14);
+    color: #dbeafe;
+    border-radius: 10px;
+    padding: 8px 10px;
+    font-size: 12px;
+    display: none;
+  }
+
   #messages-area {
     min-height: 0;
     overflow-y: auto;
@@ -459,6 +470,7 @@
       </div>
     </div>
 
+    <div id="resumeBanner" class="resume-banner"></div>
     <div id="historyModePill" class="history-pill">📖 Viewing History (read-only)</div>
     <div id="messages-area"></div>
 
@@ -605,6 +617,22 @@
     }
   }
 
+  function showResumeBanner(timestampIso, previewText) {
+    const el = document.getElementById('resumeBanner');
+    if (!el) return;
+    const ts = (timestampIso || '').replace('T', ' ').slice(0, 19) || 'unknown time';
+    const preview = (previewText || '').trim() || 'Session restored';
+    el.textContent = '📂 Resumed session from ' + ts + ' — ' + preview;
+    el.style.display = 'block';
+  }
+
+  function hideResumeBanner() {
+    const el = document.getElementById('resumeBanner');
+    if (!el) return;
+    el.style.display = 'none';
+    el.textContent = '';
+  }
+
   async function createFreshSession() {
     let nextSessionId = createSessionId();
     try {
@@ -631,6 +659,7 @@
     attached = [];
     document.getElementById('agentSessionLabel').textContent = sessionId;
     document.getElementById('messages-area').innerHTML = '';
+    hideResumeBanner();
     document.getElementById('historyModePill').style.display = 'none';
     document.getElementById('continueSessionBtn').style.display = 'none';
     document.getElementById('agentInput').disabled = false;
@@ -641,7 +670,8 @@
     document.getElementById('agentInput').focus();
   }
 
-  async function loadSessionMessages(id, asReplay) {
+  async function loadSessionMessages(id, asReplay, options) {
+    const opts = options || {};
     sessionId = id;
     selectedHistorySessionId = id;
     if (window.AKDWSession && typeof window.AKDWSession.setSession === 'function') {
@@ -669,6 +699,8 @@
       }
     });
     setReplayMode(!!asReplay);
+    showResumeBanner(opts.timestamp || data.updated_at || "", opts.preview || data.name || "");
+    scrollToBottom();
   }
 
   function setSendWaiting(enabled) {
@@ -1134,8 +1166,17 @@
       ]);
     }
     loadHistorySidebar();
+    const params = new URLSearchParams(window.location.search || "");
+    const requestedSession = params.get('session_id') || params.get('resume_session');
+    const requestedPreview = params.get('resume_preview') || '';
+    const requestedTs = params.get('resumed_at') || '';
     const persisted = window.AKDWSession ? window.AKDWSession.currentId : null;
-    if (persisted) {
+    if (requestedSession) {
+      loadSessionMessages(requestedSession, false, {
+        timestamp: requestedTs,
+        preview: requestedPreview
+      }).catch(function () { createFreshSession(); });
+    } else if (persisted) {
       loadSessionMessages(persisted, false).catch(function () { createFreshSession(); });
     } else {
       createFreshSession();

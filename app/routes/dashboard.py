@@ -16,7 +16,7 @@ from app.config import (
     get_default_model,
     get_user_display_name,
 )
-from app.models import ActivityLog, ConversionJob, ReviewSession, TriageSession, UpstreamPatch
+from app.models import ActivityLog, ConversionJob, Message, ReviewSession, Session, TriageSession, UpstreamPatch
 from app.services.env_service import (
     current_username,
     load_env_values,
@@ -129,12 +129,49 @@ def dashboard_stats():
 def dashboard_activity():
     events = []
 
+    # Primary source for resumable recent activity: shared session state bus.
+    recent_sessions = (
+        Session.query.filter_by(page="agent")
+        .order_by(Session.updated_at.desc())
+        .limit(12)
+        .all()
+    )
+    for row in recent_sessions:
+        latest = (
+            Message.query.filter_by(session_id=row.id)
+            .order_by(Message.created_at.desc())
+            .first()
+        )
+        preview = ""
+        if latest and latest.content:
+            preview = latest.content.strip().replace("\n", " ")
+        if not preview:
+            preview = row.name or row.id
+        events.append(
+            {
+                "type": "agent",
+                "module": "QGenie Agent",
+                "session_id": row.id,
+                "preview_text": preview[:160],
+                "desc": f"Agent session: {preview[:72]}",
+                "time": _relative_time(row.updated_at),
+                "timestamp": row.updated_at.isoformat() if row.updated_at else "",
+                "open_url": url_for("agent.agent_home"),
+                "sort_ts": row.updated_at.timestamp() if row.updated_at else 0,
+            }
+        )
+
     for row in ActivityLog.query.order_by(ActivityLog.created_at.desc()).limit(10).all():
         events.append(
             {
                 "type": row.event_type or "agent",
                 "desc": row.event or "Activity",
                 "time": _relative_time(row.created_at),
+                "module": "AKDW",
+                "session_id": None,
+                "preview_text": row.event or "",
+                "timestamp": row.created_at.isoformat() if row.created_at else "",
+                "open_url": None,
                 "sort_ts": row.created_at.timestamp() if row.created_at else 0,
             }
         )
@@ -146,6 +183,11 @@ def dashboard_activity():
                 "type": "review",
                 "desc": f"Reviewed {label}",
                 "time": _relative_time(row.created_at),
+                "module": "Patch Workshop",
+                "session_id": row.session_id,
+                "preview_text": str(label),
+                "timestamp": row.created_at.isoformat() if row.created_at else "",
+                "open_url": url_for("patchwise.patchwise_home"),
                 "sort_ts": row.created_at.timestamp() if row.created_at else 0,
             }
         )
@@ -161,6 +203,11 @@ def dashboard_activity():
                 "type": "triage",
                 "desc": desc,
                 "time": _relative_time(row.created_at),
+                "module": "Triage",
+                "session_id": None,
+                "preview_text": desc,
+                "timestamp": row.created_at.isoformat() if row.created_at else "",
+                "open_url": url_for("triage.triage_home"),
                 "sort_ts": row.created_at.timestamp() if row.created_at else 0,
             }
         )
@@ -171,14 +218,39 @@ def dashboard_activity():
                 "type": "convert",
                 "desc": f"Converted driver ({row.conversion_type or 'generic'})",
                 "time": _relative_time(row.created_at),
+                "module": "Converter",
+                "session_id": None,
+                "preview_text": f"Converted driver ({row.conversion_type or 'generic'})",
+                "timestamp": row.created_at.isoformat() if row.created_at else "",
+                "open_url": url_for("converter.converter_home"),
                 "sort_ts": row.created_at.timestamp() if row.created_at else 0,
             }
         )
 
     if not events:
         events = [
-            {"type": "agent", "desc": "Dashboard loaded", "time": "just now", "sort_ts": 2},
-            {"type": "agent", "desc": "Workspace initialized", "time": "just now", "sort_ts": 1},
+            {
+                "type": "agent",
+                "desc": "Dashboard loaded",
+                "time": "just now",
+                "module": "AKDW",
+                "session_id": None,
+                "preview_text": "Dashboard loaded",
+                "timestamp": "",
+                "open_url": None,
+                "sort_ts": 2,
+            },
+            {
+                "type": "agent",
+                "desc": "Workspace initialized",
+                "time": "just now",
+                "module": "AKDW",
+                "session_id": None,
+                "preview_text": "Workspace initialized",
+                "timestamp": "",
+                "open_url": None,
+                "sort_ts": 1,
+            },
         ]
 
     events.sort(key=lambda item: item.get("sort_ts", 0), reverse=True)
