@@ -1,0 +1,409 @@
+{% extends "base.html" %}
+{% block title %}Upstream Tracker{% endblock %}
+
+{% block head %}
+<style>
+  .upstream-shell {
+    display: grid;
+    gap: 12px;
+  }
+
+  .upstream-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    background: var(--gradient-card);
+    padding: 18px;
+  }
+
+  .upstream-header h1 {
+    margin: 0;
+    font-size: 1.5rem;
+  }
+
+  .upstream-header p {
+    margin: 4px 0 0;
+    color: var(--text-muted);
+  }
+
+  .upstream-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .status-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    background: rgba(255,255,255,0.03);
+  }
+
+  .status-chip {
+    border: 1px solid var(--glass-border);
+    border-radius: 999px;
+    background: rgba(255,255,255,0.04);
+    color: var(--text-primary);
+    font-size: 12px;
+    padding: 5px 10px;
+    cursor: pointer;
+  }
+
+  .status-chip.active {
+    border-color: var(--accent-blue);
+    box-shadow: var(--shadow-glow);
+  }
+
+  .upstream-tools {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .upstream-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .upstream-card {
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    background: rgba(255,255,255,0.03);
+    padding: 12px;
+    display: grid;
+    gap: 8px;
+  }
+
+  .upstream-card-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .upstream-title {
+    font-weight: 600;
+  }
+
+  .upstream-links {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 12px;
+  }
+
+  .upstream-links a,
+  .upstream-links button {
+    color: var(--accent-blue);
+    text-decoration: underline;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+  }
+
+  .upstream-meta {
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .upstream-actions-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .upstream-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    display: none;
+    place-items: center;
+    background: rgba(1, 4, 9, 0.65);
+  }
+
+  .upstream-modal.open {
+    display: grid;
+  }
+
+  .upstream-modal-card {
+    width: min(620px, 92vw);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    background: var(--bg-secondary);
+    padding: 14px;
+    display: grid;
+    gap: 10px;
+  }
+
+  .upstream-modal-card h3 {
+    margin: 0;
+  }
+
+  @media (max-width: 900px) {
+    .upstream-header {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    .upstream-tools {
+      flex-direction: column;
+      align-items: stretch;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="upstream-shell">
+  <div class="upstream-header">
+    <div>
+      <h1>📬 Upstream Patch Tracker</h1>
+      <p>Track your kernel patches on lore.kernel.org</p>
+    </div>
+    <div class="upstream-actions">
+      <button class="btn-primary" type="button" onclick="openAddModal()">+ Add Patch</button>
+      <button class="btn-secondary" type="button" onclick="refreshAll()">🔄 Refresh All</button>
+    </div>
+  </div>
+
+  <div id="statusSummary" class="status-summary"></div>
+
+  <div class="upstream-tools">
+    <div class="small-muted" id="upstreamCount">0 patches</div>
+    <select id="sortOrder" class="input small">
+      <option value="newest">Newest First</option>
+      <option value="oldest">Oldest First</option>
+      <option value="status">Status</option>
+    </select>
+  </div>
+
+  <div id="upstreamList" class="upstream-list">
+    <div class="small-muted">Loading patches...</div>
+  </div>
+</div>
+
+<div id="addModal" class="upstream-modal" onclick="if(event.target===this) closeAddModal()">
+  <div class="upstream-modal-card">
+    <h3>➕ Add Upstream Patch</h3>
+    <label class="small-muted">lore.kernel.org URL</label>
+    <input id="addUrl" class="input" placeholder="https://lore.kernel.org/...">
+    <label class="small-muted">Notes (optional)</label>
+    <textarea id="addNotes" class="input" rows="4" placeholder="My first upstream submission..."></textarea>
+    <div style="display:flex;justify-content:flex-end;gap:8px;">
+      <button class="btn-secondary" type="button" onclick="closeAddModal()">Cancel</button>
+      <button id="addSubmit" class="btn-primary" type="button" onclick="submitAddPatch()">Add & Fetch ✨</button>
+    </div>
+    <div id="addStatus" class="small-muted"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  let patches = [];
+  let activeFilter = "all";
+
+  function fmtStatus(status) {
+    return (status || "submitted").replace(/_/g, " ");
+  }
+
+  function statusClass(status) {
+    return status || "submitted";
+  }
+
+  function applyFilterSort(rows) {
+    const sort = document.getElementById("sortOrder").value;
+    let out = rows.slice();
+    if (activeFilter !== "all") {
+      out = out.filter((item) => (item.status || "submitted") === activeFilter);
+    }
+    if (sort === "oldest") {
+      out.sort((a, b) => String(a.created_at || "").localeCompare(String(b.created_at || "")));
+    } else if (sort === "status") {
+      out.sort((a, b) => String(a.status || "").localeCompare(String(b.status || "")));
+    } else {
+      out.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+    }
+    return out;
+  }
+
+  function renderStats(stats) {
+    const box = document.getElementById("statusSummary");
+    const chips = [
+      ["all", "Total", stats.total || 0],
+      ["submitted", "Submitted", stats.submitted || 0],
+      ["under_review", "Under Review", stats.under_review || 0],
+      ["changes_requested", "Changes Requested", stats.changes_requested || 0],
+      ["merged", "Merged", stats.merged || 0],
+      ["rejected", "Rejected", stats.rejected || 0]
+    ];
+    box.innerHTML = chips.map(([key, label, count]) => (
+      '<button type="button" class="status-chip ' + ((activeFilter === key) ? 'active' : '') + '" onclick="setStatusFilter(\'' + key + '\')">'
+      + label + ': ' + count + '</button>'
+    )).join("");
+  }
+
+  function cardTemplate(item) {
+    const title = item.title || item.lore_url;
+    const notes = item.notes || "";
+    const comments = item.reviewer_comments || "No reviewer comments yet";
+    return [
+      '<div class="upstream-card" data-id="' + item.id + '">',
+      '  <div class="upstream-card-head">',
+      '    <div class="upstream-title">🩹 ' + title + '</div>',
+      '    <span class="health-pill ' + statusClass(item.status) + '">' + fmtStatus(item.status) + '</span>',
+      '  </div>',
+      '  <div class="upstream-links">',
+      '    <a href="' + (item.lore_url || '#') + '" target="_blank" rel="noopener noreferrer">🔗 Open</a>',
+      '    <button type="button" onclick="copyText(\'' + (item.lore_url || '').replace(/'/g, "\\'") + '\')">📋 Copy</button>',
+      '  </div>',
+      '  <div class="upstream-meta">Submitted: ' + (item.submitted_at || 'N/A') + ' · Subsystem: ' + (item.subsystem || 'N/A') + ' · ' + (item.merged_tree || 'pending tree') + '</div>',
+      '  <div>💬 "' + comments + '"</div>',
+      '  <div class="small-muted">📝 Your notes: <span id="note-' + item.id + '">' + notes + '</span></div>',
+      '  <div class="upstream-actions-row">',
+      '    <button class="btn-secondary" type="button" onclick="editNotes(' + item.id + ')">✏ Edit Notes</button>',
+      '    <button class="btn-secondary" type="button" onclick="refreshPatch(' + item.id + ')">🔄 Refresh</button>',
+      '    <button class="btn-secondary" type="button" onclick="removePatch(' + item.id + ')">🗑 Remove</button>',
+      '  </div>',
+      '</div>'
+    ].join("");
+  }
+
+  function renderList() {
+    const rows = applyFilterSort(patches);
+    const list = document.getElementById("upstreamList");
+    document.getElementById("upstreamCount").textContent = rows.length + " patches";
+    if (!rows.length) {
+      list.innerHTML = '<div class="small-muted">No patches tracked for this filter.</div>';
+      return;
+    }
+    list.innerHTML = rows.map(cardTemplate).join("");
+  }
+
+  async function loadStats() {
+    const res = await fetch("/api/upstream/stats");
+    if (!res.ok) {
+      renderStats({ total: 0 });
+      return;
+    }
+    const data = await res.json();
+    renderStats(data);
+  }
+
+  async function loadList() {
+    const res = await fetch("/api/upstream/list");
+    if (!res.ok) {
+      document.getElementById("upstreamList").innerHTML = '<div class="small-muted">Failed to load tracker list.</div>';
+      return;
+    }
+    patches = await res.json();
+    renderList();
+  }
+
+  window.setStatusFilter = function (status) {
+    activeFilter = status;
+    loadStats();
+    renderList();
+  };
+
+  window.openAddModal = function () {
+    document.getElementById("addModal").classList.add("open");
+    document.getElementById("addStatus").textContent = "";
+  };
+
+  window.closeAddModal = function () {
+    document.getElementById("addModal").classList.remove("open");
+  };
+
+  window.submitAddPatch = async function () {
+    const btn = document.getElementById("addSubmit");
+    const status = document.getElementById("addStatus");
+    const url = document.getElementById("addUrl").value.trim();
+    const notes = document.getElementById("addNotes").value.trim();
+    if (!url) {
+      status.textContent = "URL is required";
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "Fetching patch metadata...";
+    status.textContent = "Contacting lore.kernel.org...";
+    try {
+      const res = await fetch("/api/upstream/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, notes })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Add failed");
+      }
+      document.getElementById("addUrl").value = "";
+      document.getElementById("addNotes").value = "";
+      closeAddModal();
+      await loadStats();
+      await loadList();
+    } catch (err) {
+      status.textContent = err.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Add & Fetch ✨";
+    }
+  };
+
+  window.refreshPatch = async function (id) {
+    await fetch("/api/upstream/" + id + "/refresh", { method: "POST" });
+    await loadStats();
+    await loadList();
+  };
+
+  window.refreshAll = async function () {
+    const rows = patches.slice();
+    for (const item of rows) {
+      await fetch("/api/upstream/" + item.id + "/refresh", { method: "POST" });
+    }
+    await loadStats();
+    await loadList();
+  };
+
+  window.removePatch = async function (id) {
+    await fetch("/api/upstream/" + id, { method: "DELETE" });
+    await loadStats();
+    await loadList();
+  };
+
+  window.editNotes = async function (id) {
+    const row = patches.find((item) => item.id === id);
+    if (!row) {
+      return;
+    }
+    const next = window.prompt("Update notes", row.notes || "");
+    if (next === null) {
+      return;
+    }
+    await fetch("/api/upstream/" + id, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notes: next })
+    });
+    await loadList();
+  };
+
+  window.copyText = function (value) {
+    navigator.clipboard.writeText(value || "");
+  };
+
+  document.getElementById("sortOrder").addEventListener("change", renderList);
+  loadStats();
+  loadList();
+})();
+</script>
+{% endblock %}

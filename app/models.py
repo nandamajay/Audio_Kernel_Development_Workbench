@@ -97,3 +97,22 @@ class ReviewEvidence(db.Model):
     content = db.Column(db.Text, nullable=False)  # base64 or URL
     metadata_json = db.Column(db.Text, nullable=True, default="{}")
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class UpstreamPatch(db.Model):
+    __tablename__ = "upstream_patches"
+
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(512))
+    lore_url = db.Column(db.String(1024), unique=True)
+    series_id = db.Column(db.String(256))
+    submitter = db.Column(db.String(256))
+    subsystem = db.Column(db.String(128))
+    submitted_at = db.Column(db.DateTime)
+    status = db.Column(db.String(64), nullable=False, default="submitted")
+    last_checked = db.Column(db.DateTime)
+    reviewer_comments = db.Column(db.Text)
+    merged_tree = db.Column(db.String(256))
+    tags = db.Column(db.String(256))
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)

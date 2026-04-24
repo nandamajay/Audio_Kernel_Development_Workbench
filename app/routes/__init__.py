@@ -8,6 +8,7 @@ from app.routes.editor import editor_bp
 from app.routes.evidence import evidence_bp
 from app.routes.patchwise import patchwise_bp
 from app.routes.triage import triage_bp
+from app.routes.upstream import upstream_bp
 
 
 ALL_BLUEPRINTS = [
@@ -16,6 +17,7 @@ ALL_BLUEPRINTS = [
     evidence_bp,
     editor_bp,
     patchwise_bp,
+    upstream_bp,
     converter_bp,
     triage_bp,
     agent_bp,
