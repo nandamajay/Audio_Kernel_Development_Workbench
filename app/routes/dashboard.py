@@ -155,11 +155,16 @@ def settings_page():
 def save_settings():
     payload = request.get_json() or {}
     ssl_verify_raw = payload.get("ssl_verify", os.environ.get("QGENIE_SSL_VERIFY", "true"))
-    ca_bundle_raw = payload.get("ca_bundle", os.environ.get("QGENIE_CA_BUNDLE", ""))
+    ca_bundle_raw = payload.get(
+        "ca_bundle",
+        payload.get("ca_bundle_path", os.environ.get("QGENIE_CA_BUNDLE", "")),
+    )
+    display_name_raw = payload.get("user_display_name", payload.get("display_name", ""))
+    kernel_src_raw = payload.get("kernel_src_path", payload.get("kernel_path", Config.KERNEL_SRC_PATH))
     updates = {
-        "USER_DISPLAY_NAME": (payload.get("user_display_name") or "").strip(),
+        "USER_DISPLAY_NAME": (display_name_raw or "").strip(),
         "QGENIE_DEFAULT_MODEL": (payload.get("default_model") or "auto").strip(),
-        "KERNEL_SRC_PATH": (payload.get("kernel_src_path") or Config.KERNEL_SRC_PATH).strip(),
+        "KERNEL_SRC_PATH": (kernel_src_raw or Config.KERNEL_SRC_PATH).strip(),
         "QGENIE_SSL_VERIFY": "true"
         if str(ssl_verify_raw).lower() == "true"
         else "false",

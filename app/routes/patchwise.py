@@ -124,7 +124,7 @@ def _session_to_dict(row: ReviewSession) -> Dict[str, Any]:
     return {
         "session_id": row.session_id,
         "patch_hash": row.patch_hash,
-        "summary": row.summary,
+        "summary": _json_load(row.summary, {}),
         "findings": _json_load(row.findings_json, []),
         "checkpatch_output": row.checkpatch_output or "",
         "maintainers": _json_load(row.maintainers_json, []),
