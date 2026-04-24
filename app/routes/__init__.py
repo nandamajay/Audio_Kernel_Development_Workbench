@@ -9,6 +9,7 @@ from app.routes.evidence import evidence_bp
 from app.routes.patchwise import patchwise_bp
 from app.routes.triage import triage_bp
 from app.routes.upstream import upstream_bp
+from app.routes.terminal_routes import terminal_bp
 
 
 ALL_BLUEPRINTS = [
@@ -21,4 +22,5 @@ ALL_BLUEPRINTS = [
     converter_bp,
     triage_bp,
     agent_bp,
+    terminal_bp,
 ]

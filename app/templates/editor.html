@@ -10,6 +10,8 @@
       <button id="applyPathBtn" class="btn-primary">Apply</button>
     </div>
     <div class="editor-meta">
+      <button id="editorModeBtn" class="btn-secondary mode-toggle active" data-mode="editor">EDITOR MODE</button>
+      <button id="agentModeBtn" class="btn-secondary mode-toggle agent-mode" data-mode="agent">AGENT MODE</button>
       <span>Current file: <strong id="currentFile">(none)</strong></span>
       <button id="saveFileBtn" class="btn-secondary">💾 Save</button>
     </div>
@@ -19,8 +21,8 @@
   <div class="warn-banner">No kernel source found. Mount your kernel source at /app/kernel or change the path in Settings.</div>
   {% endif %}
 
-  <div id="editorSplit" class="split-wrap">
-    <aside class="pane pane-left">
+  <div id="editorSplit" class="split-wrap editor-split">
+    <aside id="editorLeftPanel" class="pane pane-left">
       <div id="dropZone" class="drop-zone" data-dnd-events="dragover dragleave drop">Drop .c/.h/.dts/.dtsi or patch/log/text files here</div>
       <!-- dragover -->
       <!-- dragleave -->
@@ -30,8 +32,9 @@
       </div>
       <div id="fileTree" class="file-tree"></div>
     </aside>
+    <div id="editorHandleLeft" class="resize-handle" title="Resize panels"></div>
 
-    <section class="pane pane-center">
+    <section id="editorCenterPanel" class="pane pane-center">
       <div id="editorPane" class="editor-pane"></div>
       <div id="diffPanel" class="diff-panel" style="display:none;">
         <div class="diff-toolbar">
@@ -43,10 +46,11 @@
         </div>
         <div id="diffEditor" class="diff-editor"></div>
       </div>
-      <div id="terminalPane" class="terminal-pane"></div>
+      <div id="terminalPane" class="terminal-pane terminal-panel xterm-panel"></div>
     </section>
+    <div id="editorHandleRight" class="resize-handle" title="Resize panels"></div>
 
-    <aside class="pane pane-right">
+    <aside id="editorRightPanel" class="pane pane-right terminal-panel">
       <div class="chat-header-row">
         <div class="model-row">
           <label>Model</label>
@@ -94,12 +98,11 @@
 <script src="{{ url_for('static', filename='js/editor.js') }}"></script>
 <script>
   window.addEventListener('DOMContentLoaded', function () {
-    if (window.Split) {
-      Split(['.pane-left', '.pane-center', '.pane-right'], {
-        sizes: [20, 55, 25],
-        minSize: [180, 420, 260],
-        gutterSize: 8,
-      });
+    if (window.ResizablePanel) {
+      new ResizablePanel('#editorSplit', [
+        { handleId: 'editorHandleLeft', leftPanelId: 'editorLeftPanel', rightPanelId: 'editorCenterPanel' },
+        { handleId: 'editorHandleRight', leftPanelId: 'editorCenterPanel', rightPanelId: 'editorRightPanel' },
+      ]);
     }
     window.AKDWEditor.init({
       sessionId: 'sess-editor-default',

@@ -2,10 +2,12 @@ window.AKDWEditor = (function () {
   let socket = null;
   let editor = null;
   let sessionId = null;
+  let terminalSessionId = null;
   let activeModel = null;
   let activePath = null;
   let attachedFiles = [];
   let sessionPrimed = false;
+  let editorMode = "editor";
 
   window.monacoReady = false;
   window.monacoEditor = null;
@@ -36,6 +38,18 @@ window.AKDWEditor = (function () {
     if (editorLabel) editorLabel.textContent = value || "unknown";
     const topbarLabel = document.getElementById("active-session");
     if (topbarLabel) topbarLabel.textContent = value || "unknown";
+  }
+
+  async function ensureTerminalSession() {
+    if (terminalSessionId) return terminalSessionId;
+    const res = await fetch("/api/terminal/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd: activePath || "/app/kernel" }),
+    });
+    const data = await res.json();
+    terminalSessionId = data.session_id || ("term-" + Date.now());
+    return terminalSessionId;
   }
 
   function linkifyText(text) {
@@ -314,20 +328,38 @@ window.AKDWEditor = (function () {
     input.value = "";
     addStepCard({ type: "thinking", content: "Analysing request...", timestamp: new Date().toLocaleTimeString() });
 
-    const res = await fetch("/api/agent/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        session_id: sessionId,
-        page: "editor",
-        model: activeModel,
-        message: outbound,
-        attachments: attachedFiles,
-        selected_code: selectedCode || "",
-        filename: filename,
-      }),
-    });
-    const data = await res.json();
+    let data = {};
+    if (editorMode === "agent") {
+      await ensureTerminalSession();
+      const res = await fetch("/api/terminal/agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: terminalSessionId,
+          prompt: outbound,
+          cwd: activePath || "/app/kernel",
+          file_context: selectedCode || editor.getValue().slice(0, 6000),
+          filename: filename,
+          model: activeModel,
+        }),
+      });
+      data = await res.json();
+    } else {
+      const res = await fetch("/api/agent/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          page: "editor",
+          model: activeModel,
+          message: outbound,
+          attachments: attachedFiles,
+          selected_code: selectedCode || "",
+          filename: filename,
+        }),
+      });
+      data = await res.json();
+    }
     const answer = (data.response || data.content || data.message || "").trim() || "⚠️ No response received. Please retry.";
     addChatBubble("assistant", answer);
     addStepCard({ type: "response", content: answer, timestamp: new Date().toLocaleTimeString() });
@@ -461,10 +493,14 @@ window.AKDWEditor = (function () {
 
   function initSocketHandlers() {
     socket = io();
+    const terminalSocket = io("/terminal");
     window.AKDWTerminal.init({
       containerId: "terminalPane",
-      socket: socket,
-      sessionId: sessionId || "editor-live",
+      socket: terminalSocket,
+      sessionId: terminalSessionId || sessionId || "editor-live",
+      getSessionId: function () {
+        return terminalSessionId || sessionId || "editor-live";
+      },
     });
 
     socket.on("agent_step", function (msg) {
@@ -555,8 +591,26 @@ window.AKDWEditor = (function () {
     const savedPath = localStorage.getItem("akdw_editor_path") || opts.defaultPath;
     loadTree(savedPath);
     await ensureEditorSession();
+    await ensureTerminalSession();
     sessionPrimed = false;
     await primeEditorContext();
+
+    const editorModeBtn = document.getElementById("editorModeBtn");
+    const agentModeBtn = document.getElementById("agentModeBtn");
+    if (editorModeBtn && agentModeBtn) {
+      editorModeBtn.addEventListener("click", function () {
+        editorMode = "editor";
+        editorModeBtn.classList.add("active");
+        agentModeBtn.classList.remove("active");
+        setStatus("Switched to EDITOR mode");
+      });
+      agentModeBtn.addEventListener("click", function () {
+        editorMode = "agent";
+        agentModeBtn.classList.add("active");
+        editorModeBtn.classList.remove("active");
+        setStatus("Switched to AGENT mode");
+      });
+    }
   }
 
   return { init: init };

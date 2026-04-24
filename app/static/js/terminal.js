@@ -16,7 +16,7 @@ window.AKDWTerminal = (function () {
     term.open(container);
     fitAddon.fit();
 
-    const socket = opts.socket;
+    const socket = opts.socket || io("/terminal");
     const sessionId = opts.sessionId;
     const getSessionId = typeof opts.getSessionId === 'function'
       ? opts.getSessionId
@@ -24,19 +24,56 @@ window.AKDWTerminal = (function () {
 
     window.addEventListener('resize', function () {
       try { fitAddon.fit(); } catch (_) {}
+      if (socket) {
+        socket.emit("terminal:resize", {
+          session_id: getSessionId(),
+          cols: term.cols || 80,
+          rows: term.rows || 24,
+        });
+      }
     });
 
     if (socket) {
-      socket.on('terminal_output', function (msg) {
+      socket.emit("terminal:join", { session_id: getSessionId() });
+      socket.on("terminal:output", function (msg) {
         if (msg && msg.session_id && msg.session_id !== getSessionId()) return;
-        term.write((msg && msg.data) || '');
+        term.write((msg && msg.data) || "");
+      });
+      socket.on("agent:tool_call", function (msg) {
+        if (msg && msg.session_id && msg.session_id !== getSessionId()) return;
+        term.write("\r\n" + (msg.message || "") + "\r\n");
+      });
+      socket.on("agent:output", function (msg) {
+        if (msg && msg.session_id && msg.session_id !== getSessionId()) return;
+        term.write((msg.output || "") + "\r\n");
+      });
+      socket.on("agent:complete", function (msg) {
+        if (msg && msg.session_id && msg.session_id !== getSessionId()) return;
+        term.write("\r\n" + (msg.message || "") + "\r\n");
       });
     }
+
+    term.onData(function (data) {
+      if (!socket) return;
+      socket.emit("terminal:input", { session_id: getSessionId(), data: data });
+    });
+
+    setTimeout(function () {
+      try { fitAddon.fit(); } catch (_) {}
+      if (socket) {
+        socket.emit("terminal:resize", {
+          session_id: getSessionId(),
+          cols: term.cols || 80,
+          rows: term.rows || 24,
+        });
+      }
+    }, 100);
 
     return {
       term: term,
       write: function (text) { term.write(text || ''); },
       clear: function () { term.clear(); },
+      socket: socket,
     };
   }
 

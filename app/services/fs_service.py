@@ -39,6 +39,10 @@ def _allowed_roots() -> List[str]:
         os.path.abspath(workspace_path()),
         os.path.abspath(kernel_src_path()),
         os.path.abspath(workspace_mounts_path()),
+        os.path.abspath("/app/kernel"),
+        os.path.abspath("/app/workspace"),
+        os.path.abspath("/workspace"),
+        os.path.abspath("/local/mnt/workspace"),
     ]
     roots.extend(extra_workspace_paths())
     # Preserve order while removing duplicates.
