@@ -107,3 +107,16 @@ def agent_chat_api():
             "message": result.get("response", ""),
         }
     )
+
+
+@api_bp.post("/api/agent/new_session")
+def agent_new_session_api():
+    payload = request.get_json(silent=True) or {}
+    session_id = (payload.get("session_id") or create_session_id()).strip()
+    page = (payload.get("page") or "agent").strip()
+
+    from flask import current_app
+
+    service = current_app.extensions["agent_service"]
+    service.new_session(session_id)
+    return jsonify({"ok": True, "session_id": session_id, "page": page})

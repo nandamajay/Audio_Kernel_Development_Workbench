@@ -166,27 +166,29 @@
     width: fit-content;
   }
 
-  .dot {
+  .thinking-bubble span {
+    display: inline-block;
     width: 8px;
     height: 8px;
-    background: #58a6ff;
+    background: var(--accent-blue);
     border-radius: 50%;
-    animation: bounce 1.2s infinite;
+    margin: 0 2px;
+    animation: bounce 1.2s infinite ease-in-out;
   }
 
-  .dot:nth-child(2) {
+  .thinking-bubble span:nth-child(2) {
     animation-delay: 0.2s;
   }
 
-  .dot:nth-child(3) {
+  .thinking-bubble span:nth-child(3) {
     animation-delay: 0.4s;
   }
 
   @keyframes bounce {
-    0%, 60%, 100% {
+    0%, 80%, 100% {
       transform: translateY(0);
     }
-    30% {
+    40% {
       transform: translateY(-8px);
     }
   }
@@ -205,12 +207,13 @@
     text-decoration: underline;
     text-decoration-color: rgba(59, 130, 246, 0.4);
     text-underline-offset: 2px;
+    word-break: break-all;
     transition: color 0.15s;
   }
 
   .chat-link:hover {
-    color: #60a5fa;
-    text-decoration-color: #60a5fa;
+    color: var(--accent-purple);
+    text-decoration-color: var(--accent-purple);
   }
 
   .ext-icon {
@@ -220,6 +223,29 @@
     margin-left: 3px;
     opacity: 0.6;
     font-size: 10px;
+  }
+
+  .ai-bubble {
+    padding-right: 36px;
+  }
+
+  .copy-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    border: 1px solid var(--glass-border);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-primary);
+    font-size: 12px;
+    padding: 2px 6px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+
+  .ai-bubble:hover .copy-btn {
+    opacity: 1;
   }
 
   .copy-code-btn {
@@ -373,16 +399,67 @@
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   }
 
-  function linkifyText(text) {
-    return (text || '').replace(
-      /(https?:\/\/[^\s<>"]+)/g,
-      '<a href="$1" target="_blank" rel="noopener noreferrer" class="chat-link">$1 <span class="ext-icon">↗</span></a>'
-    );
+  function escapeHtml(text) {
+    return String(text || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function linkifyRenderedHtml(htmlText) {
+    const host = document.createElement('div');
+    host.innerHTML = htmlText || '';
+
+    const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+    const textNodes = [];
+    let node = walker.nextNode();
+    while (node) {
+      textNodes.push(node);
+      node = walker.nextNode();
+    }
+
+    const urlRegex = /(https?:\/\/[^\s<>"']+)/g;
+    textNodes.forEach(function (textNode) {
+      const parent = textNode.parentElement;
+      if (!parent || parent.closest('a')) return;
+      const rawText = textNode.nodeValue || '';
+      if (!urlRegex.test(rawText)) return;
+      urlRegex.lastIndex = 0;
+
+      const frag = document.createDocumentFragment();
+      let last = 0;
+      let match = urlRegex.exec(rawText);
+      while (match) {
+        if (match.index > last) {
+          frag.appendChild(document.createTextNode(rawText.slice(last, match.index)));
+        }
+        const url = match[0];
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.target = '_blank';
+        anchor.rel = 'noopener noreferrer';
+        anchor.className = 'chat-link';
+        anchor.textContent = url;
+        frag.appendChild(anchor);
+        last = match.index + url.length;
+        match = urlRegex.exec(rawText);
+      }
+      if (last < rawText.length) {
+        frag.appendChild(document.createTextNode(rawText.slice(last)));
+      }
+      textNode.parentNode.replaceChild(frag, textNode);
+    });
+
+    return host.innerHTML;
   }
 
   function renderAssistantHtml(text) {
-    const linked = linkifyText(text || '');
-    if (!window.marked) return linked;
+    const normalized = (text || '').trim() || '⚠️ No response received. Please retry.';
+    if (!window.marked) {
+      return linkifyRenderedHtml(escapeHtml(normalized).replace(/\n/g, '<br>'));
+    }
     const renderer = new window.marked.Renderer();
     renderer.link = function (href, title, txt) {
       const tip = title || href;
@@ -390,11 +467,37 @@
         (txt || href) + ' <span class="ext-icon">↗</span></a>';
     };
     window.marked.setOptions({ renderer: renderer, breaks: true });
-    return window.marked.parse(linked);
+    const rendered = window.marked.parse(normalized);
+    return linkifyRenderedHtml(rendered);
   }
 
-  function createNewSession() {
-    sessionId = createSessionId();
+  function copyMsg(btn) {
+    const aiBubble = btn.closest('.ai-bubble');
+    const contentEl = aiBubble ? aiBubble.querySelector('.msg-content') : null;
+    const text = contentEl ? contentEl.innerText : '';
+    navigator.clipboard.writeText(text).then(function () {
+      btn.textContent = '✅';
+      setTimeout(function () { btn.textContent = '📋'; }, 1500);
+    });
+  }
+
+  async function createFreshSession() {
+    let nextSessionId = createSessionId();
+    try {
+      const res = await fetch('/api/agent/new_session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ page: 'agent' }),
+      });
+      const data = await res.json();
+      if (data && data.session_id) {
+        nextSessionId = data.session_id;
+      }
+    } catch (err) {
+      // Keep local fallback session id if API fails.
+    }
+
+    sessionId = nextSessionId;
     selectedHistorySessionId = null;
     replayMode = false;
     waiting = false;
@@ -432,13 +535,27 @@
     row.className = 'msg-row ' + (role === 'user' ? 'user' : 'assistant');
 
     const bubble = document.createElement('div');
-    bubble.className = 'bubble ' + (role === 'user' ? 'user' : 'assistant');
-
-    if (role === 'assistant' && asMarkdown && window.marked) {
-      bubble.innerHTML = renderAssistantHtml(text || '');
-      decorateCodeBlocks(bubble);
+    if (role === 'assistant') {
+      bubble.className = 'bubble assistant ai-bubble';
+      bubble.innerHTML =
+        '<button class="copy-btn" type="button" title="Copy response">📋</button>' +
+        '<div class="msg-content">' + renderAssistantHtml(text || '') + '</div>';
+      const copyBtn = bubble.querySelector('.copy-btn');
+      if (copyBtn) {
+        copyBtn.addEventListener('click', function () {
+          copyMsg(copyBtn);
+        });
+      }
+      const contentEl = bubble.querySelector('.msg-content');
+      if (contentEl && asMarkdown) {
+        decorateCodeBlocks(contentEl);
+      }
     } else {
-      bubble.textContent = text || '';
+      bubble.className = 'bubble user';
+      const contentEl = document.createElement('div');
+      contentEl.className = 'msg-content';
+      contentEl.textContent = text || '';
+      bubble.appendChild(contentEl);
     }
 
     const stamp = document.createElement('span');
@@ -470,11 +587,11 @@
   }
 
   function appendThinkingBubble() {
-    const thinkingId = 'thinking-' + Date.now();
+    const thinkingId = 'thinking-' + createSessionId();
     const row = document.createElement('div');
     row.className = 'msg-row thinking';
     row.id = thinkingId;
-    row.innerHTML = '<div class="thinking-bubble"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>';
+    row.innerHTML = '<div class="thinking-bubble"><span></span><span></span><span></span></div>';
     document.getElementById('messages-area').appendChild(row);
     scrollToBottom();
     return thinkingId;
@@ -483,15 +600,28 @@
   function replaceThinkingBubble(thinkingId, responseText) {
     const row = document.getElementById(thinkingId);
     if (!row) {
-      appendBubble('assistant', responseText, true);
+      appendBubble('assistant', responseText || '⚠️ No response received. Please retry.', true);
       return;
     }
+    const resolved = (responseText || '').trim() || '⚠️ No response received. Please retry.';
     const replacement = document.createElement('div');
     replacement.className = 'msg-row assistant';
-    replacement.innerHTML = '<div class="bubble assistant">' + renderAssistantHtml(responseText || '') +
+    replacement.innerHTML =
+      '<div class="bubble assistant ai-bubble">' +
+      '<button class="copy-btn" type="button" title="Copy response">📋</button>' +
+      '<div class="msg-content">' + renderAssistantHtml(resolved) + '</div>' +
       '<span class="bubble-time">' + nowStamp() + '</span></div>';
     row.replaceWith(replacement);
-    decorateCodeBlocks(replacement);
+    const copyBtn = replacement.querySelector('.copy-btn');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', function () {
+        copyMsg(copyBtn);
+      });
+    }
+    const contentEl = replacement.querySelector('.msg-content');
+    if (contentEl) {
+      decorateCodeBlocks(contentEl);
+    }
     scrollToBottom();
   }
 
@@ -551,7 +681,8 @@
         }),
       });
       const data = await res.json();
-      replaceThinkingBubble(thinkingId, data.response || data.content || data.message || 'No response');
+      const responseText = (data.response || data.content || data.message || '').trim();
+      replaceThinkingBubble(thinkingId, responseText || '⚠️ No response received. Please retry.');
       attached = [];
       renderAttachPills();
       loadHistorySidebar();
@@ -633,7 +764,7 @@
   }
 
   document.getElementById('newChatBtn').addEventListener('click', function () {
-    createNewSession();
+    createFreshSession();
   });
 
   document.getElementById('clearChatBtn').addEventListener('click', function () {
@@ -682,7 +813,7 @@
   });
 
   document.addEventListener('DOMContentLoaded', function() {
-    createNewSession();
+    createFreshSession();
     loadHistorySidebar();
     autoResizeInput();
   });

@@ -169,6 +169,10 @@ class AgentService:
             to=session_id,
         )
 
+    def new_session(self, session_id: str) -> str:
+        self.session_histories[session_id] = [{"role": "system", "content": AGENT_SYSTEM_PROMPT}]
+        return session_id
+
     def build_user_prompt(self, message: str, attachments: List[Dict[str, str]]) -> str:
         prompt = (message or "").strip()
         chunks = [prompt]
@@ -346,7 +350,7 @@ class AgentService:
         content = getattr(response, "content", "")
         if isinstance(content, str) and content.strip():
             return content
-        return "Model returned an empty response."
+        return "⚠️ No response received. Please retry."
 
     def _suggest_patch(self, selected_code: str) -> Optional[Dict[str, str]]:
         if not selected_code.strip():
@@ -449,6 +453,19 @@ class AgentService:
         if url_context_chunks:
             user_content += "\n\nFetched URL content:\n\n" + "\n\n---\n\n".join(url_context_chunks)
 
+        shared_urls = self._extract_urls(message or "")
+        if shared_urls:
+            for shared_url in shared_urls:
+                history.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            "The user shared this URL: "
+                            f"{shared_url}. Refer to it in follow-up questions within this session."
+                        ),
+                    }
+                )
+
         history = self._truncate_history(history + [{"role": "user", "content": user_content}])
         assistant_text = self._try_qgenie_chat(active_model, history)
         parsed_steps = parse_stream_steps(assistant_text)
@@ -465,7 +482,11 @@ class AgentService:
 
         # Deterministic fallback for context-check prompts when model returns generic output.
         msg_lower = (message or "").lower()
-        if "what was the topic" in msg_lower or "what did i just mention" in msg_lower:
+        if (
+            "what was the topic" in msg_lower
+            or "what did i just mention" in msg_lower
+            or "what codec did i mention" in msg_lower
+        ):
             previous_user = ""
             for item in reversed(history[:-1]):
                 if item.get("role") == "user":
@@ -476,6 +497,9 @@ class AgentService:
                     "You previously mentioned: "
                     + previous_user.splitlines()[0][:220]
                 )
+
+        if not final_response.strip():
+            final_response = "⚠️ No response received. Please retry."
 
         history = self._truncate_history(history + [{"role": "assistant", "content": final_response}])
         self.session_histories[session_id] = history
