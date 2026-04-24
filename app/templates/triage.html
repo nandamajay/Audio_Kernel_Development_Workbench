@@ -58,8 +58,7 @@
   }
 
   .triage-grid {
-    display: grid;
-    grid-template-columns: 1fr 430px;
+    display: flex;
     gap: 12px;
     min-height: 0;
   }
@@ -72,6 +71,15 @@
     padding: 14px;
     min-height: 0;
     overflow: auto;
+  }
+
+  .triage-main {
+    flex: 1 1 auto;
+  }
+
+  .triage-results {
+    width: 430px;
+    flex: none;
   }
 
   .triage-hero {
@@ -216,7 +224,10 @@
 
   @media (max-width: 1200px) {
     .triage-grid {
-      grid-template-columns: 1fr;
+      flex-direction: column;
+    }
+    .triage-results {
+      width: 100%;
     }
     .triage-step-indicator {
       grid-template-columns: 1fr;
@@ -241,9 +252,9 @@
     <div id="triageStep4" class="triage-step"><span class="triage-step-dot">4</span><span>File Bug / Fix</span></div>
   </div>
 
-  <div class="triage-grid">
-    <section class="triage-main">
-      <div class="triage-hero">
+  <div id="triageSplit" class="triage-grid">
+    <section id="triageMainPanel" class="triage-main">
+      <div class="triage-hero triage-onboarding">
         <div class="triage-hero-icon">🩺</div>
         <h2>Kernel Triage Assistant</h2>
         <p>Paste your crash log, kernel oops, dmesg output, or BUG() trace below. QGenie will identify the root cause, affected subsystem, and suggested fix.</p>
@@ -271,7 +282,9 @@ Paste your full dmesg / oops / BUG() output here" spellcheck="false"></textarea>
       </div>
     </section>
 
-    <aside class="triage-results">
+    <div id="triageResizeHandle" class="resize-handle" title="Resize panels"></div>
+
+    <aside id="triageResultsPanel" class="triage-results">
       <h3>🔍 Triage Results</h3>
       <div id="triage-results-placeholder" class="results-placeholder">
         Structured findings will appear here after analysis.
@@ -396,6 +409,11 @@ Paste your full dmesg / oops / BUG() output here" spellcheck="false"></textarea>
 
   updateLineCount();
   setStep(1);
+  if (window.ResizablePanel) {
+    new ResizablePanel("#triageSplit", [
+      { handleId: "triageResizeHandle", leftPanelId: "triageMainPanel", rightPanelId: "triageResultsPanel" }
+    ]);
+  }
 })();
 </script>
 {% endblock %}

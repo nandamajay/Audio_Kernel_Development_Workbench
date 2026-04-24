@@ -594,6 +594,16 @@ body {
 .path-switcher { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; width: min(780px, 100%); }
 .editor-meta { display: flex; align-items: center; gap: 8px; }
 .split-wrap { display: flex; gap: 0; min-height: 0; height: 100%; }
+.resize-handle {
+  width: 4px;
+  background: var(--glass-border);
+  cursor: col-resize;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+.resize-handle:hover {
+  background: var(--accent-blue);
+}
 .pane { min-height: 0; }
 .pane-left,
 .pane-right { display: grid; grid-template-rows: auto auto 1fr; gap: 8px; padding: 8px; border: 1px solid var(--border); background: var(--panel); }

@@ -66,8 +66,7 @@
   }
 
   .patchwise-grid {
-    display: grid;
-    grid-template-columns: 270px 1fr 430px;
+    display: flex;
     gap: 12px;
     min-height: 0;
   }
@@ -81,6 +80,20 @@
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid var(--glass-border);
     border-radius: var(--radius-card);
+  }
+
+  .patchwise-left {
+    width: 270px;
+    flex: none;
+  }
+
+  .patchwise-center {
+    flex: 1 1 auto;
+  }
+
+  .patchwise-right {
+    width: 430px;
+    flex: none;
   }
 
   .onboarding {
@@ -317,6 +330,12 @@
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid var(--glass-border);
     border-radius: 14px 14px 14px 4px;
+    position: relative;
+    padding-right: 34px;
+  }
+
+  .assistant-bubble .msg-content {
+    word-break: break-word;
   }
 
   .chat-link {
@@ -365,7 +384,11 @@
 
   @media (max-width: 1300px) {
     .patchwise-grid {
-      grid-template-columns: 1fr;
+      flex-direction: column;
+    }
+    .patchwise-left,
+    .patchwise-right {
+      width: 100%;
     }
   }
 </style>
@@ -399,8 +422,8 @@
     <div id="stepExport" class="step-item"><span class="step-dot">4</span><span>Export Report</span></div>
   </div>
 
-  <div class="patchwise-grid">
-    <aside class="patchwise-left">
+  <div id="patchwiseSplit" class="patchwise-grid">
+    <aside id="patchwiseLeftPanel" class="patchwise-left">
       <h3>Files</h3>
       <div id="onboardingPrompt" class="onboarding">
         <div class="icon">📂</div>
@@ -410,7 +433,7 @@
       </div>
       <input type="file" id="pw-file-input" accept=".c,.h,.dts,.dtsi,.patch,.log,.txt,.diff" multiple style="display:none">
       <div id="patchDropZone" class="drop-zone">Drop patch/source/log files here</div>
-      <div id="fileReadyBanner" class="file-ready-banner"></div>
+      <div id="fileReadyBanner" class="file-ready-banner file-loaded"></div>
       <div id="patchFileList" class="file-tree"></div>
       <div id="fileNextTip" class="next-tip">💡 Next: Click "Run AI Review" to get AI feedback, or "Run Checkpatch" to check kernel coding style.</div>
       <div class="patch-session-list">
@@ -418,8 +441,9 @@
         <div id="patchSessions"></div>
       </div>
     </aside>
+    <div id="patchwiseHandleLeft" class="resize-handle" title="Resize panels"></div>
 
-    <section class="patchwise-center">
+    <section id="patchwiseCenterPanel" class="patchwise-center">
       <h3>Patch Content</h3>
       <div class="patch-context">Patch context and notes</div>
       <label class="small-muted" title="Paste a link to the upstream LKML discussion, GitHub PR, or kernel commit for context">Context URL (optional)</label>
@@ -437,8 +461,9 @@
       <textarea id="patchContent" class="input" style="font-family:'IBM Plex Mono',monospace;min-height:480px;"></textarea>
       <div id="checkpatchOutput" class="small-muted"></div>
     </section>
+    <div id="patchwiseHandleRight" class="resize-handle" title="Resize panels"></div>
 
-    <aside class="patchwise-right">
+    <aside id="patchwiseRightPanel" class="patchwise-right">
       <h3>Review Results</h3>
       <div id="patchPathListing" class="small-muted">Active path: /app/kernel</div>
       <div id="reviewSummary" class="small-muted"></div>
@@ -470,4 +495,14 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/folder_browser.js') }}"></script>
 <script src="{{ url_for('static', filename='js/patchwise.js') }}"></script>
+<script>
+  window.addEventListener('DOMContentLoaded', function () {
+    if (window.ResizablePanel) {
+      new ResizablePanel('#patchwiseSplit', [
+        { handleId: 'patchwiseHandleLeft', leftPanelId: 'patchwiseLeftPanel', rightPanelId: 'patchwiseCenterPanel' },
+        { handleId: 'patchwiseHandleRight', leftPanelId: 'patchwiseCenterPanel', rightPanelId: 'patchwiseRightPanel' },
+      ]);
+    }
+  });
+</script>
 {% endblock %}
