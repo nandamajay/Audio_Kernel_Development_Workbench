@@ -7,6 +7,8 @@ import json
 import os
 import re
 import subprocess
+import tempfile
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
@@ -15,6 +17,7 @@ import requests
 from bs4 import BeautifulSoup
 from flask import Blueprint, current_app, jsonify, render_template, request
 from sqlalchemy import inspect, text
+from werkzeug.utils import secure_filename
 
 from app.config import MODEL_METADATA, get_available_models, get_default_model
 from app.models import ReviewEvidence, ReviewSession, db
@@ -23,6 +26,34 @@ from app.services.env_service import resolve_ssl_verify
 
 patchwise_bp = Blueprint("patchwise", __name__)
 _schema_checked = False
+_uploaded_files: Dict[str, str] = {}
+
+
+def _ensure_upload_dir() -> str:
+    upload_dir = "/app/uploads"
+    os.makedirs(upload_dir, exist_ok=True)
+    try:
+        os.chmod(upload_dir, 0o777)
+    except Exception:
+        pass
+    return upload_dir
+
+
+def _allowed_patch_dirs() -> List[str]:
+    return ["/app/kernel", "/app/uploads", "/tmp", tempfile.gettempdir()]
+
+
+def _is_allowed_patch_path(path_value: str) -> bool:
+    try:
+        real_path = os.path.realpath(path_value)
+    except Exception:
+        return False
+
+    for raw_root in _allowed_patch_dirs():
+        root = os.path.realpath(raw_root)
+        if real_path == root or real_path.startswith(root + os.sep):
+            return True
+    return False
 
 
 def _json_load(text: str | None, fallback: Any) -> Any:
@@ -258,17 +289,60 @@ def patchwise_home():
     )
 
 
+@patchwise_bp.post("/api/patchwise/upload")
+def upload_patch():
+    upload_dir = _ensure_upload_dir()
+    if "file" not in request.files:
+        return jsonify({"ok": False, "error": "file is required"}), 400
+
+    file_obj = request.files["file"]
+    if not file_obj or not (file_obj.filename or "").strip():
+        return jsonify({"ok": False, "error": "invalid file"}), 400
+
+    token = str(uuid.uuid4())
+    safe_name = secure_filename(file_obj.filename) or "patch.diff"
+    dest_path = os.path.join(upload_dir, f"{token}_{safe_name}")
+    file_obj.save(dest_path)
+    _uploaded_files[token] = dest_path
+
+    return jsonify(
+        {
+            "ok": True,
+            "token": token,
+            "filename": safe_name,
+            "filepath": dest_path,
+        }
+    )
+
+
 @patchwise_bp.post("/api/patchwise/review")
 def review_patch():
     _ensure_review_session_schema()
+    _ensure_upload_dir()
     payload = request.get_json() or {}
     session_id = (payload.get("session_id") or f"patch-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}").strip()
     patch_content = payload.get("patch_content", "")
+    filepath = (payload.get("filepath") or "").strip()
+    upload_token = (payload.get("upload_token") or "").strip()
     context_url = (payload.get("context_url") or "").strip()
     model = (payload.get("model") or get_default_model()).strip()
 
+    if not patch_content.strip() and upload_token and upload_token in _uploaded_files:
+        filepath = _uploaded_files[upload_token]
+
+    if not patch_content.strip() and filepath:
+        if not _is_allowed_patch_path(filepath):
+            return jsonify({"ok": False, "error": "Path not allowed"}), 403
+        if not os.path.isfile(filepath):
+            return jsonify({"ok": False, "error": "Patch file not found"}), 404
+        try:
+            with open(filepath, "r", encoding="utf-8", errors="replace") as handle:
+                patch_content = handle.read()
+        except Exception as exc:
+            return jsonify({"ok": False, "error": f"Unable to read patch file: {exc}"}), 400
+
     if not patch_content.strip():
-        return jsonify({"ok": False, "error": "patch_content is required"}), 400
+        return jsonify({"ok": False, "error": "patch_content or filepath is required"}), 400
 
     context_text = _fetch_context_url(context_url) if context_url else ""
 
@@ -292,6 +366,8 @@ def review_patch():
         ai_raw = f"[ai review fallback: {exc}]"
 
     metadata = _extract_patch_metadata(patch_content)
+    if filepath and not (metadata.get("patch_filename") or "").strip():
+        metadata["patch_filename"] = os.path.basename(filepath)
     file_paths = _extract_patch_files(patch_content)
     maintainers = _get_maintainers_for_files(file_paths)
     findings = _extract_findings(ai_raw, patch_content)

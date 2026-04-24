@@ -6,6 +6,9 @@ window.AKDWPatchwise = (function () {
 
   let files = [];
   let hasResults = false;
+  let reviewStarted = false;
+  let exportedReport = false;
+  let reviewProgressTimer = null;
   let sessionId = localStorage.getItem(sessionKey) || ("pw-" + Math.random().toString(36).slice(2, 10));
   localStorage.setItem(sessionKey, sessionId);
 
@@ -52,25 +55,36 @@ window.AKDWPatchwise = (function () {
     return window.marked.parse(safe);
   }
 
-  function setStepState(uploadLoaded, reviewRun) {
+  function setStepState(uploadLoaded, reviewInProgress, resultsReady, reportExported) {
     const s1 = document.getElementById("stepUpload");
     const s2 = document.getElementById("stepReview");
     const s3 = document.getElementById("stepResults");
+    const s4 = document.getElementById("stepExport");
     s1.className = "step-item";
     s2.className = "step-item";
     s3.className = "step-item";
+    s4.className = "step-item";
 
     if (!uploadLoaded) {
       s1.classList.add("active");
       return;
     }
     s1.classList.add("completed");
-    if (!reviewRun) {
+    if (!reviewInProgress) {
       s2.classList.add("active");
       return;
     }
     s2.classList.add("completed");
-    s3.classList.add("active");
+    if (!resultsReady) {
+      s3.classList.add("active");
+      return;
+    }
+    s3.classList.add("completed");
+    if (!reportExported) {
+      s4.classList.add("active");
+      return;
+    }
+    s4.classList.add("completed");
   }
 
   function hasPatchContent() {
@@ -91,7 +105,7 @@ window.AKDWPatchwise = (function () {
       btn.title = btn.disabled ? "Load a patch file first" : "";
     });
 
-    reviewBtn.classList.toggle("btn-enabled-pulse", ready && !hasResults);
+    reviewBtn.classList.toggle("ready", ready && !hasResults);
     if (hasResults) {
       exportBtn.style.borderColor = "rgba(16, 185, 129, 0.45)";
       exportBtn.style.boxShadow = "0 0 12px rgba(16, 185, 129, 0.35)";
@@ -118,20 +132,27 @@ window.AKDWPatchwise = (function () {
     const list = document.getElementById("patchFileList");
     const onboarding = document.getElementById("onboardingPrompt");
     const hint = document.getElementById("contextHint");
+    const readyBanner = document.getElementById("fileReadyBanner");
+    const nextTip = document.getElementById("fileNextTip");
     list.innerHTML = "";
 
     if (!files.length) {
       onboarding.style.display = "grid";
       hint.style.display = "none";
+      readyBanner.style.display = "none";
+      nextTip.style.display = "none";
       list.innerHTML = '<div class="small-muted">No files selected.</div>';
-      setStepState(false, hasResults);
+      setStepState(false, reviewStarted, hasResults, exportedReport);
       setActionState();
       return;
     }
 
     onboarding.style.display = "none";
     hint.style.display = "block";
-    setStepState(true, hasResults);
+    readyBanner.style.display = "block";
+    nextTip.style.display = "block";
+    readyBanner.textContent = "✅ " + files[0].name + " loaded (" + fmtSize(files[0].size) + ") — ready to review";
+    setStepState(true, reviewStarted, hasResults, exportedReport);
 
     files.forEach(function (f, idx) {
       const chip = document.createElement("div");
@@ -148,6 +169,8 @@ window.AKDWPatchwise = (function () {
         if (files.length === 0) {
           document.getElementById("patchContent").value = "";
           hasResults = false;
+          reviewStarted = false;
+          exportedReport = false;
           document.getElementById("reviewFindings").innerHTML = "";
           document.getElementById("reviewPlaceholder").style.display = "grid";
         }
@@ -165,6 +188,66 @@ window.AKDWPatchwise = (function () {
       document.getElementById("patchContent").value = files[0].content || "";
     }
     setActionState();
+  }
+
+  function setReviewRunning(isRunning) {
+    const reviewBtn = document.getElementById("runReviewBtn");
+    const hintBtn = document.getElementById("hintRunReviewBtn");
+    const placeholderBtn = document.getElementById("placeholderRunBtn");
+    const checkBtn = document.getElementById("runCheckpatchBtn");
+
+    if (isRunning) {
+      reviewBtn.disabled = true;
+      checkBtn.disabled = true;
+      hintBtn.disabled = true;
+      placeholderBtn.disabled = true;
+      reviewBtn.classList.add("btn-disabled");
+      reviewBtn.innerHTML = '<span class="btn-spinner"></span>Reviewing...';
+      return;
+    }
+
+    reviewBtn.innerHTML = "▶ Run AI Review";
+    hintBtn.disabled = false;
+    placeholderBtn.disabled = false;
+    setActionState();
+  }
+
+  function startReviewProgress() {
+    const progressEl = document.getElementById("reviewProgress");
+    const fillEl = document.getElementById("reviewProgressFill");
+    const pctEl = document.getElementById("reviewProgressPct");
+    let pct = 8;
+
+    progressEl.style.display = "block";
+    fillEl.style.width = pct + "%";
+    pctEl.textContent = pct + "%";
+
+    clearInterval(reviewProgressTimer);
+    reviewProgressTimer = setInterval(function () {
+      pct = Math.min(90, pct + Math.floor(Math.random() * 9) + 3);
+      fillEl.style.width = pct + "%";
+      pctEl.textContent = pct + "%";
+      if (pct >= 90) {
+        clearInterval(reviewProgressTimer);
+        reviewProgressTimer = null;
+      }
+    }, 280);
+  }
+
+  function stopReviewProgress(success) {
+    const progressEl = document.getElementById("reviewProgress");
+    const fillEl = document.getElementById("reviewProgressFill");
+    const pctEl = document.getElementById("reviewProgressPct");
+    clearInterval(reviewProgressTimer);
+    reviewProgressTimer = null;
+
+    if (success) {
+      fillEl.style.width = "100%";
+      pctEl.textContent = "100%";
+    }
+    setTimeout(function () {
+      progressEl.style.display = "none";
+    }, success ? 420 : 0);
   }
 
   function handleFilesDropped(fileList) {
@@ -254,7 +337,9 @@ window.AKDWPatchwise = (function () {
         renderFindings(detail.session.findings || [], detail.session.summary || {});
         document.getElementById("reviewPlaceholder").style.display = "none";
         hasResults = (detail.session.findings || []).length > 0;
-        setStepState(true, hasResults);
+        reviewStarted = hasResults;
+        exportedReport = (item.status || "") === "exported";
+        setStepState(true, reviewStarted, hasResults, exportedReport);
         setActionState();
       });
       root.appendChild(entry);
@@ -282,7 +367,8 @@ window.AKDWPatchwise = (function () {
       const fid = item.id || ("f-" + (index + 1));
       const subject = item.description || "";
       const card = document.createElement("div");
-      card.className = "finding-card";
+      card.className = "finding-card results-enter";
+      card.style.animationDelay = Math.min(index * 60, 360) + "ms";
       card.dataset.findingId = fid;
       card.innerHTML = [
         '<span class="severity-badge ' + sevClass(item.severity) + '">' + escapeHtml(item.severity || "INFO") + "</span>",
@@ -440,31 +526,46 @@ window.AKDWPatchwise = (function () {
     const model = document.getElementById("patchModel").value;
     if (!patchContent.trim()) return;
 
-    const res = await fetch("/api/patchwise/review", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        session_id: sessionId,
-        patch_content: patchContent,
-        context_url: contextUrl,
-        model: model,
-      }),
-    });
-    const data = await res.json();
-    if (!data.ok && !data.findings) {
-      document.getElementById("reviewSummary").textContent = data.error || "Review failed";
-      return;
-    }
+    reviewStarted = true;
+    exportedReport = false;
+    setStepState(true, true, false, false);
+    setReviewRunning(true);
+    startReviewProgress();
 
-    hasResults = true;
-    setStepState(true, true);
-    setActionState();
-    renderFindings(data.findings || [], data.summary || {});
-    const maintainers = Array.isArray(data.maintainers) && data.maintainers.length
-      ? data.maintainers
-      : await fetchMaintainersFromPatch(patchContent);
-    renderMaintainers(maintainers);
-    loadSessionList();
+    try {
+      const res = await fetch("/api/patchwise/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          patch_content: patchContent,
+          context_url: contextUrl,
+          model: model,
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok && !data.findings) {
+        document.getElementById("reviewSummary").textContent = data.error || "Review failed";
+        stopReviewProgress(false);
+        return;
+      }
+
+      hasResults = true;
+      setStepState(true, true, true, false);
+      setActionState();
+      renderFindings(data.findings || [], data.summary || {});
+      const maintainers = Array.isArray(data.maintainers) && data.maintainers.length
+        ? data.maintainers
+        : await fetchMaintainersFromPatch(patchContent);
+      renderMaintainers(maintainers);
+      loadSessionList();
+      stopReviewProgress(true);
+    } catch (err) {
+      document.getElementById("reviewSummary").textContent = "Review failed";
+      stopReviewProgress(false);
+    } finally {
+      setReviewRunning(false);
+    }
   }
 
   async function runCheckpatch() {
@@ -493,6 +594,8 @@ window.AKDWPatchwise = (function () {
     link.click();
     URL.revokeObjectURL(link.href);
     link.remove();
+    exportedReport = true;
+    setStepState(true, true, true, true);
     loadSessionList();
   }
 
@@ -579,7 +682,9 @@ window.AKDWPatchwise = (function () {
     document.getElementById("hintCheckpatchBtn").addEventListener("click", runCheckpatch);
     document.getElementById("pwAskBtn").addEventListener("click", askReviewer);
     document.getElementById("patchContent").addEventListener("input", function () {
-      if (this.value.trim()) setStepState(true, hasResults);
+      if (this.value.trim()) {
+        setStepState(true, reviewStarted, hasResults, exportedReport);
+      }
       setActionState();
     });
 
@@ -587,6 +692,7 @@ window.AKDWPatchwise = (function () {
     renderFiles();
     refreshPath();
     setActionState();
+    setStepState(false, false, false, false);
     loadSessionList();
   }
 
