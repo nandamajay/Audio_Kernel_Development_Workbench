@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import datetime
 from email.utils import parsedate_to_datetime
@@ -14,6 +15,7 @@ from flask import Blueprint, current_app, jsonify, render_template, request
 
 from app.config import get_default_model
 from app.models import UpstreamPatch, db
+from app.services.activity_service import log_activity
 from app.services.env_service import resolve_ssl_verify
 
 
@@ -58,6 +60,30 @@ def _infer_subsystem(title: str) -> str:
     if "arm64" in low:
         return "arm64"
     return "Kernel"
+
+
+def _detect_source(url: str) -> str:
+    low = (url or "").lower()
+    if "lore.kernel.org" in low:
+        return "lore"
+    if "github.com" in low:
+        return "github"
+    if "gerrit" in low:
+        return "gerrit"
+    return "unknown"
+
+
+def _default_submitter() -> str:
+    # Prefer configured settings/env; fall back to known submitter address.
+    values = {
+        os.environ.get("USER_EMAIL", "").strip(),
+        os.environ.get("QGENIE_USER_EMAIL", "").strip(),
+        "ajay.nandam@oss.qualcomm.com",
+    }
+    for value in values:
+        if value and "@" in value:
+            return value
+    return "ajay.nandam@oss.qualcomm.com"
 
 
 def _infer_status(text_blob: str, reply_count: int) -> str:
@@ -112,7 +138,7 @@ def _fetch_lore_metadata(url: str) -> Dict[str, Any]:
     verify = _verify_value()
     title = url
     series_id = ""
-    submitter = "Unknown"
+    submitter = _default_submitter()
     submitted_at = None
     reviewer_comments = ""
     merged_tree = ""
@@ -185,7 +211,7 @@ def _fetch_lore_metadata(url: str) -> Dict[str, Any]:
     return {
         "title": title,
         "series_id": series_id,
-        "submitter": submitter,
+        "submitter": submitter or _default_submitter(),
         "subsystem": _infer_subsystem(title),
         "submitted_at": submitted_at,
         "status": inferred_status,
@@ -244,8 +270,8 @@ def upstream_add():
     payload = request.get_json() or {}
     url = (payload.get("url") or "").strip()
     notes = (payload.get("notes") or "").strip()
-    if not url or "lore.kernel.org" not in url:
-        return jsonify({"ok": False, "error": "Valid lore.kernel.org URL is required"}), 400
+    if not url:
+        return jsonify({"ok": False, "error": "Valid URL is required"}), 400
 
     row = UpstreamPatch.query.filter_by(lore_url=url).first()
     if row:
@@ -255,22 +281,26 @@ def upstream_add():
         return jsonify(_patch_to_dict(row))
 
     meta = _fetch_lore_metadata(url)
+    forced_title = (payload.get("title") or "").strip()
+    forced_status = (payload.get("status") or "").strip()
+    source = _detect_source(url)
     row = UpstreamPatch(
-        title=meta.get("title"),
+        title=forced_title or meta.get("title") or url,
         lore_url=url,
         series_id=meta.get("series_id"),
-        submitter=meta.get("submitter"),
+        submitter=meta.get("submitter") or _default_submitter(),
         subsystem=meta.get("subsystem"),
         submitted_at=meta.get("submitted_at"),
-        status=meta.get("status") or "submitted",
+        status=(forced_status if forced_status in STATUS_VALUES else meta.get("status")) or "submitted",
         last_checked=meta.get("last_checked"),
-        reviewer_comments=meta.get("reviewer_comments"),
+        reviewer_comments=((meta.get("reviewer_comments") or "") + (" [source:" + source + "]")).strip(),
         merged_tree=meta.get("merged_tree"),
         tags=meta.get("tags"),
         notes=notes,
     )
     db.session.add(row)
     db.session.commit()
+    log_activity("Added patch to tracker: " + (row.title or row.lore_url or "")[:120], "upstream")
     return jsonify(_patch_to_dict(row))
 
 

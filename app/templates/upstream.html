@@ -161,7 +161,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="upstream-shell">
+<div class="upstream-shell upstream-tracker">
   <div class="upstream-header">
     <div>
       <h1>📬 Upstream Patch Tracker</h1>
@@ -256,7 +256,7 @@
     const notes = item.notes || "";
     const comments = item.reviewer_comments || "No reviewer comments yet";
     return [
-      '<div class="upstream-card" data-id="' + item.id + '">',
+      '<div class="upstream-card patch-card" data-id="' + item.id + '">',
       '  <div class="upstream-card-head">',
       '    <div class="upstream-title">🩹 ' + title + '</div>',
       '    <span class="health-pill ' + statusClass(item.status) + '">' + fmtStatus(item.status) + '</span>',
