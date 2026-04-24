@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sqlite3
+import uuid
 from datetime import datetime
-from typing import Optional, TypedDict
+from typing import Any, Optional, TypedDict
 
+from app.agents.architect_background_worker import ArchitectBackgroundWorker
 from app.agents.architect_reviewer_agent import ArchitectReviewerAgent
 from app.agents.designer_agent import DesignerAgent
 from app.agents.email_notifier import EmailNotifier
 from app.agents.parallel_think_agent import ParallelThinkAgent
 from app.agents.project_plan_manager import ProjectPlanManager
+from app.agents.shared_state import AgentStateDB
 from app.db import DB_PATH
 
 try:
@@ -194,3 +198,218 @@ def _save_to_db(state: AgentState, role: str, content: str):
     )
     conn.commit()
     conn.close()
+
+
+class AKDWParallelGraph:
+    """Async dual-agent graph for parallel designer/architect execution."""
+
+    def __init__(self):
+        self.designer = DesignerAgent()
+        self.architect = ArchitectReviewerAgent()
+        self.plan_mgr = ProjectPlanManager()
+        self.notifier = EmailNotifier()
+        self.state_db = AgentStateDB()
+        self.background_worker = ArchitectBackgroundWorker()
+
+    async def _run_designer(
+        self,
+        session_id: str,
+        round_num: int,
+        task_description: str,
+        feedback: str,
+    ) -> str:
+        self.state_db.append_history(session_id, round_num, "designer_lifecycle", "designer started")
+        # Small delay to make parallel architect outputs observable before finish.
+        await asyncio.sleep(0.20)
+        output = await asyncio.to_thread(self.designer.run, task_description, feedback)
+        self.state_db.append_history(session_id, round_num, "designer_output", output)
+        self.state_db.append_history(session_id, round_num, "designer_lifecycle", "designer finished")
+        return output
+
+    def _resolve_task_identity(self, phase: int, task_description: str) -> tuple[str, str]:
+        plan = self.plan_mgr.load()
+        phase_obj = next((p for p in plan.get("phases", []) if int(p.get("id", 0)) == int(phase)), None)
+        if phase_obj:
+            pending = next((t for t in phase_obj.get("tasks", []) if t.get("status") == "PENDING"), None)
+            if pending:
+                return str(pending.get("id", f"{phase}.1")), str(pending.get("description") or task_description)
+            # No pending task in this phase: create an ad-hoc task so completion updates plan.
+            seq = len(phase_obj.get("tasks", [])) + 1
+            task_id = f"{phase}.{seq}"
+            ad_hoc = {
+                "id": task_id,
+                "name": f"Ad-hoc execution task {task_id}",
+                "status": "PENDING",
+                "assigned_to": "Designer",
+                "description": task_description or f"Ad-hoc task in phase {phase}",
+                "auto_created": True,
+                "created_at": datetime.utcnow().isoformat(),
+            }
+            phase_obj.setdefault("tasks", []).append(ad_hoc)
+            self.plan_mgr.save(plan)
+            return task_id, ad_hoc["description"]
+        return f"{phase}.adhoc", task_description
+
+    def _force_human_gate(self, architect_hint: str) -> bool:
+        hint = (architect_hint or "").strip().lower()
+        return any(token in hint for token in ("human_review", "force_human", "manual_gate", "pause_loop"))
+
+    def _parallel_evidence(self, history: list[dict[str, Any]]) -> dict[str, Any]:
+        architect_first = None
+        designer_start = None
+        designer_finish = None
+        for row in history:
+            role = row.get("role")
+            ts = row.get("timestamp")
+            content = (row.get("content") or "").lower()
+            if role == "architect_background" and architect_first is None:
+                architect_first = ts
+            if role == "designer_lifecycle" and "started" in content and designer_start is None:
+                designer_start = ts
+            if role == "designer_lifecycle" and "finished" in content:
+                designer_finish = ts
+        before_finish = bool(architect_first and designer_finish and architect_first <= designer_finish)
+        overlap = bool(architect_first and designer_start and architect_first >= designer_start)
+        return {
+            "architect_output_before_designer_finish": before_finish,
+            "overlap_detected": overlap or before_finish,
+            "architect_first_output_ts": architect_first,
+            "designer_started_ts": designer_start,
+            "designer_finished_ts": designer_finish,
+        }
+
+    async def ainvoke(self, state: dict[str, Any]) -> dict[str, Any]:
+        session_id = state.get("session_id") or f"da-run-{uuid.uuid4().hex[:10]}"
+        phase = int(state.get("current_phase") or 0)
+        designer_task = (state.get("designer_task") or "").strip()
+        architect_hint = (state.get("architect_task") or "").strip()
+        review_status = "pending"
+        max_rounds = int(state.get("max_rounds") or MAX_ROUNDS)
+        feedback = ""
+        enhancement_log = list(state.get("enhancement_log") or [])
+
+        task_id, resolved_task = self._resolve_task_identity(phase, designer_task)
+        task_description = resolved_task or designer_task
+
+        self.state_db.upsert_session(session_id, task_id, "running")
+        self.state_db.append_history(session_id, 0, "orchestrator", f"parallel run started for {task_id}")
+
+        verdict = "NEEDS_REVISION"
+        last_review: dict[str, Any] = {}
+        rounds_executed = 0
+
+        for round_num in range(1, max_rounds + 1):
+            rounds_executed = round_num
+            architect_bg = asyncio.create_task(
+                self.background_worker.run(
+                    session_id=session_id,
+                    round_num=round_num,
+                    designer_task=task_description,
+                    architect_hint=architect_hint,
+                    state_db=self.state_db,
+                )
+            )
+            designer_job = asyncio.create_task(
+                self._run_designer(
+                    session_id=session_id,
+                    round_num=round_num,
+                    task_description=task_description,
+                    feedback=feedback,
+                )
+            )
+
+            architect_ctx, designer_output = await asyncio.gather(architect_bg, designer_job)
+            parallel_result = architect_ctx.get("parallel_think") or {}
+
+            review_result = await asyncio.to_thread(
+                self.architect.review,
+                task_description,
+                designer_output,
+                parallel_result,
+                task_id,
+                round_num,
+            )
+
+            if self._force_human_gate(architect_hint):
+                review_result["verdict"] = ArchitectReviewerAgent.VERDICT_HUMAN
+                review_result["human_review_reason"] = (
+                    review_result.get("human_review_reason")
+                    or "Forced by architect_hint manual gate."
+                )
+                self.plan_mgr.add_human_review_item(
+                    {
+                        "task_id": task_id,
+                        "reason": review_result["human_review_reason"],
+                        "round": round_num,
+                    }
+                )
+                self.notifier.send(
+                    "REVIEW_REQUIRED",
+                    f"Task {task_id} — forced manual gate",
+                    f"<p>Dual-agent run paused by manual architect gate.</p>"
+                    f"<p><b>Reason:</b> {review_result['human_review_reason']}</p>",
+                    {
+                        "Session": session_id,
+                        "Task": task_id,
+                        "Round": round_num,
+                    },
+                )
+
+            verdict = review_result.get("verdict", ArchitectReviewerAgent.VERDICT_REVISE)
+            last_review = review_result
+            review_status = verdict
+            enhancement_log.extend(review_result.get("enhancements") or [])
+            self.state_db.append_history(
+                session_id,
+                round_num,
+                "review_result",
+                AgentStateDB.as_json(review_result),
+            )
+
+            if verdict == ArchitectReviewerAgent.VERDICT_APPROVED:
+                next_task, next_phase = self.plan_mgr.get_next_pending_task()
+                if next_task:
+                    self.state_db.append_history(
+                        session_id,
+                        round_num,
+                        "architect_background",
+                        f"auto-queued next task {next_task.get('id')} - {next_task.get('name')}",
+                    )
+                    task_id = next_task.get("id", task_id)
+                    task_description = next_task.get("description", task_description)
+                    phase = int((next_phase or {}).get("id", phase))
+                    if bool(state.get("auto_continue", True)):
+                        feedback = ""
+                        continue
+                break
+
+            if verdict == ArchitectReviewerAgent.VERDICT_REVISE:
+                issues = review_result.get("issues") or []
+                feedback = "\n".join(issues) if issues else "Please tighten implementation details."
+                continue
+
+            if verdict == ArchitectReviewerAgent.VERDICT_HUMAN:
+                break
+
+        final_status = "paused" if verdict == ArchitectReviewerAgent.VERDICT_HUMAN else "complete"
+        self.state_db.upsert_session(session_id, task_id, final_status, verdict=verdict)
+        history = self.state_db.get_history(session_id)
+        evidence = self._parallel_evidence(history)
+
+        return {
+            "session_id": session_id,
+            "current_phase": phase,
+            "review_status": review_status,
+            "rounds_executed": rounds_executed,
+            "final_verdict": verdict,
+            "project_plan": self.plan_mgr.load(),
+            "enhancement_log": enhancement_log,
+            "email_queue": self.notifier.get_recent_logs(10),
+            "history": history,
+            "parallel_evidence": evidence,
+            "latest_review": last_review,
+        }
+
+
+def build_akdw_graph() -> AKDWParallelGraph:
+    return AKDWParallelGraph()

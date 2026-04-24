@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 import threading
@@ -8,9 +9,10 @@ from datetime import datetime
 
 from flask import Blueprint, jsonify, render_template, request
 
-from app.agents.dual_agent_orchestrator import DB_PATH, create_orchestrator
+from app.agents.dual_agent_orchestrator import DB_PATH, build_akdw_graph, create_orchestrator
 from app.agents.email_notifier import EmailNotifier
 from app.agents.project_plan_manager import ProjectPlanManager
+from app.agents.shared_state import AgentStateDB
 
 bp = Blueprint("dual_agent", __name__)
 _sessions = {}
@@ -180,4 +182,42 @@ def auto_create_phase5():
         phase_id=5,
         phase_name=phase_name,
     )
+    return jsonify(result)
+
+
+@bp.route("/api/dual-agent/run", methods=["POST"])
+def run_dual_agent():
+    data = request.get_json(silent=True) or {}
+    phase = data.get("phase")
+    task = data.get("task")
+    if phase is None or not task:
+        return jsonify({"error": "phase and task are required"}), 400
+
+    graph = build_akdw_graph()
+    state_db = AgentStateDB()
+    init_state = {
+        "current_phase": phase,
+        "designer_task": task,
+        "architect_task": data.get("architect_hint", ""),
+        "project_plan": state_db.get_project_plan(),
+        "enhancement_log": [],
+        "email_queue": [],
+        "review_status": "pending",
+        "auto_continue": bool(data.get("auto_continue", True)),
+        "max_rounds": int(data.get("max_rounds", 5)),
+    }
+    result = asyncio.run(graph.ainvoke(init_state))
+
+    sid = result.get("session_id")
+    if sid:
+        _sessions[sid] = {
+            "status": "paused" if result.get("final_verdict") == "HUMAN_REVIEW_REQUIRED" else "complete",
+            "task": task,
+            "task_id": result.get("latest_review", {}).get("next_task", {}).get("id", str(task)),
+            "round": result.get("rounds_executed", 0),
+            "verdict": result.get("final_verdict"),
+            "started_at": datetime.utcnow().isoformat(),
+            "completed_at": datetime.utcnow().isoformat(),
+        }
+
     return jsonify(result)

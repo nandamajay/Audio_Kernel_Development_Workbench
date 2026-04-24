@@ -7,11 +7,11 @@
   <section class="hero-banner hero-banner-v6">
     <div class="hero-left">
       <h1>👋 Welcome back, {{ user_display_name }}</h1>
-      <p class="hero-sub">Audio Kernel Driver Workbench · Phase 3</p>
+      <p class="hero-sub">Audio Kernel Driver Workbench · Phase {{ current_phase }}</p>
       <div class="hero-badges">
         <span class="badge badge-blue">🟢 QGenie Online</span>
-        <span class="badge badge-green">Phase 3 Active</span>
-        <span class="badge badge-muted">v3.0 Phase 3</span>
+        <span class="badge badge-green">Phase {{ current_phase }} Active</span>
+        <span class="badge badge-muted">v3.0 Phase {{ current_phase }}</span>
       </div>
       <div class="hero-badges">
         <span class="badge badge-muted">{{ default_model }}</span>

@@ -10,6 +10,7 @@ from flask_migrate import Migrate
 from flask_socketio import SocketIO
 
 from app.config import Config, is_first_run
+from app.agents.project_plan_manager import ProjectPlanManager
 from app.db import ensure_dual_agent_tables
 from app.models import db
 from app.routes import ALL_BLUEPRINTS
@@ -40,6 +41,15 @@ def create_app(config_class=Config):
 
     app.extensions["agent_service"] = AgentService(socketio)
     register_socket_handlers(socketio)
+
+    @app.context_processor
+    def _inject_plan_meta():
+        phase = "?"
+        try:
+            phase = ProjectPlanManager().load().get("current_phase", "?")
+        except Exception:
+            pass
+        return {"current_phase": phase}
 
     @app.before_request
     def _first_run_gate():
