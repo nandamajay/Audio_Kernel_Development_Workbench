@@ -21,7 +21,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
 
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
 
   <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
   {% block head %}{% endblock %}
@@ -37,21 +37,22 @@
         <a href="{{ url_for('editor.editor_home') }}" class="nav-item"><span class="icon">📝</span><span class="label">Code Editor</span></a>
         <a href="{{ url_for('patchwise.patchwise_home') }}" class="nav-item"><span class="icon">🩹</span><span class="label">Patch Workshop</span></a>
         <a href="{{ url_for('converter.converter_home') }}" class="nav-item"><span class="icon">🔄</span><span class="label">Driver Converter</span></a>
-        <a href="{{ url_for('triage.triage_home') }}" class="nav-item"><span class="icon">🐛</span><span class="label">Triage</span></a>
+        <a href="{{ url_for('triage.triage_home') }}" class="nav-item"><span class="icon">🩺</span><span class="label">Triage</span></a>
         <a href="{{ url_for('agent.agent_home') }}" class="nav-item"><span class="icon">🤖</span><span class="label">QGenie Agent</span></a>
         <a href="{{ url_for('dashboard.settings_page') }}" class="nav-item"><span class="icon">⚙️</span><span class="label">Settings</span></a>
+        <a href="{{ url_for('dashboard.setup_page') }}" class="nav-item"><span class="icon">🧪</span><span class="label">Setup</span></a>
       </nav>
+      <div class="sidebar-footer-badge">AKDW v2.0 Phase 3</div>
     </aside>
 
     <main class="main-shell">
       <header class="topbar">
         <div class="topbar-left">
           <h1>AKDW | Audio Kernel Driver Workbench</h1>
-          <span class="session">Active session: <span id="active-session">default</span></span>
+          <span class="session-chip">Session: <span id="active-session">default</span></span>
         </div>
         <div class="topbar-right">
-          <span class="status-dot"></span>
-          <span>QGenie Online</span>
+          <span class="status-chip"><span class="status-dot"></span>QGenie Online</span>
           <a class="settings-link" href="{{ url_for('dashboard.settings_page') }}">⚙️</a>
         </div>
       </header>
@@ -81,6 +82,19 @@
       if (window.hljs) {
         window.hljs.highlightAll();
       }
+
+      var path = window.location.pathname || "/";
+      var navItems = document.querySelectorAll(".nav-item");
+      navItems.forEach(function (item) {
+        try {
+          var hrefPath = new URL(item.href).pathname;
+          var isRoot = hrefPath === "/";
+          var active = isRoot ? path === "/" : path.startsWith(hrefPath);
+          if (active) item.classList.add("active");
+        } catch (err) {
+          // Ignore malformed item href.
+        }
+      });
     })();
   </script>
   {% block scripts %}{% endblock %}

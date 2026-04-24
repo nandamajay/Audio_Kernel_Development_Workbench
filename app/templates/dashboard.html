@@ -3,50 +3,116 @@
 {% block title %}Dashboard{% endblock %}
 
 {% block content %}
-<div class="dashboard-wrap">
-  <section class="hero-panel">
-    <div class="hero-header">
-      <h2>Welcome back, {{ user_display_name }} 👋</h2>
-      <a class="hero-settings" href="{{ url_for('dashboard.settings_page') }}">Open Settings</a>
-    </div>
-    <div class="stats-grid">
-      <article class="stat-card"><h3>Patches reviewed today</h3><p>{{ stats.patches_reviewed }}</p></article>
-      <article class="stat-card"><h3>Drivers converted (total)</h3><p>{{ stats.drivers_converted }}</p></article>
-      <article class="stat-card"><h3>Triage sessions</h3><p>{{ stats.triage_sessions }}</p></article>
-      <article class="stat-card"><h3>Last git activity</h3><p>{{ stats.last_git_activity }}</p></article>
+<div class="dashboard-wrap premium-dashboard">
+  <section class="hero-banner">
+    <div class="hero-banner-grid"></div>
+    <div class="hero-banner-content">
+      <h2>👋 Welcome back, {{ user_display_name }}</h2>
+      <div class="hero-pills">
+        <span class="status-pill status-online">● QGenie Online</span>
+        <span class="status-pill"> {{ default_model }} ★</span>
+      </div>
+      <p>Your audio kernel development workspace</p>
     </div>
   </section>
 
-  <section class="cards-grid">
-    <a class="action-card" href="{{ url_for('patchwise.patchwise_home') }}">🩹 Review My Patches</a>
-    <a class="action-card" href="{{ url_for('converter.converter_home') }}">🔄 Convert Driver</a>
-    <a class="action-card" href="{{ url_for('triage.triage_home') }}">🐛 Triage Issue</a>
-    <a class="action-card" href="{{ url_for('editor.editor_home') }}">📝 Open Code Editor</a>
-    <a class="action-card" href="{{ url_for('agent.agent_home') }}">🤖 Chat with QGenie</a>
+  <section class="stats-grid stats-grid-premium">
+    <article class="stat-card">
+      <span class="accent-bar accent-blue"></span>
+      <div class="stat-head"><span class="stat-label">Patches</span><span class="stat-icon">🩹</span></div>
+      <div class="stat-value">{{ stats.patches_reviewed }}</div>
+      <div class="stat-trend">No regressions tracked yet</div>
+    </article>
+    <article class="stat-card">
+      <span class="accent-bar accent-purple"></span>
+      <div class="stat-head"><span class="stat-label">Drivers</span><span class="stat-icon">🔧</span></div>
+      <div class="stat-value">{{ stats.drivers_converted }}</div>
+      <div class="stat-trend">Conversion queue idle</div>
+    </article>
+    <article class="stat-card">
+      <span class="accent-bar accent-orange"></span>
+      <div class="stat-head"><span class="stat-label">Triage</span><span class="stat-icon">🩺</span></div>
+      <div class="stat-value">{{ stats.triage_sessions }}</div>
+      <div class="stat-trend">Awaiting crash logs</div>
+    </article>
+    <article class="stat-card">
+      <span class="accent-bar accent-green"></span>
+      <div class="stat-head"><span class="stat-label">Git</span><span class="stat-icon">🌿</span></div>
+      <div class="stat-value">{{ stats.last_git_activity }}</div>
+      <div class="stat-trend">Workspace initialized</div>
+    </article>
+  </section>
+
+  <section class="cards-grid action-grid">
+    <a class="action-card" href="{{ url_for('patchwise.patchwise_home') }}">
+      <span class="action-icon">🔧</span>
+      <span class="action-title">Review My Patches</span>
+      <span class="action-sub">→ Open Workshop</span>
+    </a>
+    <a class="action-card" href="{{ url_for('converter.converter_home') }}">
+      <span class="action-icon">🔄</span>
+      <span class="action-title">Convert Driver</span>
+      <span class="action-sub">→ Open Converter</span>
+    </a>
+    <a class="action-card" href="{{ url_for('triage.triage_home') }}">
+      <span class="action-icon">🩺</span>
+      <span class="action-title">Triage Issue</span>
+      <span class="action-sub">→ Analyze Crash Logs</span>
+    </a>
+    <a class="action-card" href="{{ url_for('editor.editor_home') }}">
+      <span class="action-icon">📝</span>
+      <span class="action-title">Open Code Editor</span>
+      <span class="action-sub">→ Start Editing</span>
+    </a>
+    <a class="action-card" href="{{ url_for('agent.agent_home') }}">
+      <span class="action-icon">🤖</span>
+      <span class="action-title">Chat with QGenie</span>
+      <span class="action-sub">→ Ask Agent</span>
+    </a>
   </section>
 
   <section class="panel-grid">
-    <article class="panel">
-      <h3>Recent Activity</h3>
-      <ul class="activity-list">
+    <article class="panel premium-panel">
+      <div class="panel-head">
+        <h3>📋 Recent Activity</h3>
+        <a href="#" class="panel-link">View All</a>
+      </div>
+      {% if recent_activity %}
+      <ul class="activity-list premium-activity-list">
         {% for item in recent_activity %}
-          <li><span>{{ item.label }}</span><time>{{ item.timestamp }}</time></li>
+        <li>
+          <span class="activity-dot"></span>
+          <span class="activity-label">{{ item.label }}</span>
+          <time>{{ item.timestamp }}</time>
+        </li>
         {% endfor %}
       </ul>
+      {% else %}
+      <div class="empty-activity">🕘 No activity yet</div>
+      {% endif %}
     </article>
-    <article class="panel">
-      <h3>Patch Health</h3>
-      <canvas id="patchHealthChart" height="120"></canvas>
+
+    <article class="panel premium-panel">
+      <h3>📊 Patch Health</h3>
+      <div class="health-row">
+        <span>Checkpatch Issues</span>
+        <span class="health-pill na">N/A</span>
+      </div>
+      <div class="health-row">
+        <span>Upstream Readiness</span>
+        <span class="health-pill na">N/A</span>
+      </div>
+      <div class="health-row">
+        <span>Last Review Score</span>
+        <span class="health-pill na">N/A</span>
+      </div>
     </article>
   </section>
-</div>
-{% endblock %}
 
-{% block scripts %}
-<script src="{{ url_for('static', filename='js/charts.js') }}"></script>
-<script>
-  if (window.AKDWCharts && window.AKDWCharts.renderPatchHealthChart) {
-    window.AKDWCharts.renderPatchHealthChart('patchHealthChart');
-  }
-</script>
+  <section class="tips-strip">
+    <span class="tip-chip">💡 Drop a .patch file into Patch Workshop to start</span>
+    <span class="tip-chip">💡 Use Triage to analyze kernel crash dumps</span>
+    <span class="tip-chip">💡 Code Editor supports Monaco with AI inline review</span>
+  </section>
+</div>
 {% endblock %}

@@ -72,6 +72,7 @@ def dashboard():
         stats=stats,
         recent_activity=recent_activity,
         user_display_name=get_user_display_name(),
+        default_model=get_default_model(),
     )
 
 
