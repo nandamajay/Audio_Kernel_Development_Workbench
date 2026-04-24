@@ -88,7 +88,21 @@ def start():
     plan_mgr = ProjectPlanManager()
     task, _ = plan_mgr.get_next_pending_task()
     if not task:
-        return jsonify({"error": "No pending tasks in plan"}), 400
+        auto = plan_mgr.auto_create_phase_from_enhancements(
+            phase_id=5,
+            phase_name="Enhancement Execution Sprint",
+        )
+        task, _ = plan_mgr.get_next_pending_task()
+        if not task:
+            return (
+                jsonify(
+                    {
+                        "error": "No pending tasks in plan",
+                        "phase_autocreate": auto,
+                    }
+                ),
+                400,
+            )
     sid = f"da-{uuid.uuid4().hex[:8]}"
     graph, on_finish = create_orchestrator()
     init_state = {
@@ -156,3 +170,14 @@ def human_approve(task_id):
     """Human-in-the-loop: Ajay approves after manual review."""
     ProjectPlanManager().mark_task_complete(task_id)
     return jsonify({"status": "approved", "task_id": task_id})
+
+
+@bp.route("/api/dual-agent/phase5/auto-create", methods=["POST"])
+def auto_create_phase5():
+    data = request.get_json(silent=True) or {}
+    phase_name = (data.get("phase_name") or "Enhancement Execution Sprint").strip()
+    result = ProjectPlanManager().auto_create_phase_from_enhancements(
+        phase_id=5,
+        phase_name=phase_name,
+    )
+    return jsonify(result)

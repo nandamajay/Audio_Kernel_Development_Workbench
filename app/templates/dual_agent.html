@@ -49,6 +49,7 @@
     </div>
     <div style="display:flex;align-items:center;gap:8px;">
       <span id="runStatusPill" class="status-pill IDLE">IDLE</span>
+      <button id="autoPhaseBtn" class="btn-secondary" type="button">⚙ Auto Create Phase 5</button>
       <button id="startRunBtn" class="btn-primary" type="button">▶ Start Agent Run</button>
     </div>
   </div>
@@ -240,6 +241,21 @@
     if(pollTimer) clearInterval(pollTimer);
     await pollStatus();
     pollTimer=setInterval(pollStatus, 1500);
+  });
+
+  document.getElementById('autoPhaseBtn').addEventListener('click', async function(){
+    const r=await fetch('/api/dual-agent/phase5/auto-create', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({})
+    });
+    const d=await r.json();
+    if(!r.ok){
+      alert(d.error || 'Failed to create phase 5');
+      return;
+    }
+    await refreshPlanOnly();
+    alert((d.created ? 'Phase 5 created.' : 'Phase 5 already exists.') + ' Tasks: ' + (d.tasks_created || 0));
   });
 
   refreshPlanOnly();

@@ -93,3 +93,100 @@ class ProjectPlanManager:
             f"HUMAN REVIEW QUEUE:  {len(plan['human_review_queue'])} items",
         ]
         return "\n".join(lines)
+
+    def auto_create_phase_from_enhancements(
+        self,
+        phase_id: int = 5,
+        phase_name: str = "Enhancement Execution Sprint",
+    ) -> dict:
+        """Promote enhancement backlog items into a new execution phase."""
+        plan = self.load()
+        phases = plan.get("phases", [])
+
+        existing = next((p for p in phases if p.get("id") == phase_id), None)
+        if existing:
+            return {
+                "created": False,
+                "phase_id": phase_id,
+                "tasks_created": 0,
+                "phase_status": existing.get("status", "PLANNED"),
+                "message": "Phase already exists",
+            }
+
+        backlog = plan.get("enhancement_backlog", [])
+        candidates = []
+        seen_titles = set()
+        for enh in backlog:
+            if str(enh.get("status", "")).upper() not in {"PROPOSED", "NEW"}:
+                continue
+            title = (enh.get("title") or "Enhancement").strip()
+            norm = title.lower()
+            if norm in seen_titles:
+                continue
+            seen_titles.add(norm)
+            candidates.append(enh)
+
+        tasks = []
+        for idx, enh in enumerate(candidates, start=1):
+            task_id = f"{phase_id}.{idx}"
+            title = (enh.get("title") or f"Enhancement {idx}").strip()
+            rationale = (enh.get("rationale") or "").strip()
+            effort = (enh.get("effort") or "M").strip().upper()
+            priority = "MEDIUM"
+            if effort == "S":
+                priority = "LOW"
+            elif effort == "L":
+                priority = "HIGH"
+            tasks.append(
+                {
+                    "id": task_id,
+                    "name": title,
+                    "status": "PENDING",
+                    "assigned_to": "Designer",
+                    "description": rationale or f"Implement enhancement: {title}",
+                    "source_enhancement_id": enh.get("id", ""),
+                    "priority": priority,
+                }
+            )
+            enh["status"] = "PLANNED_FOR_EXECUTION"
+            enh["promoted_task_id"] = task_id
+            enh["promoted_at"] = datetime.utcnow().isoformat()
+
+        if not tasks:
+            tasks = [
+                {
+                    "id": f"{phase_id}.1",
+                    "name": "Architect Hardening Sweep",
+                    "status": "PENDING",
+                    "assigned_to": "Designer",
+                    "description": "Run one hardening cycle across dual-agent orchestration and UI stability.",
+                    "priority": "MEDIUM",
+                }
+            ]
+
+        all_prior_complete = all(
+            p.get("status") == "COMPLETE" for p in phases if int(p.get("id", 0)) < phase_id
+        )
+        phase_status = "IN_PROGRESS" if all_prior_complete else "PLANNED"
+        phases.append(
+            {
+                "id": phase_id,
+                "name": phase_name,
+                "status": phase_status,
+                "tasks": tasks,
+                "created_at": datetime.utcnow().isoformat(),
+                "auto_generated": True,
+            }
+        )
+        plan["phases"] = phases
+        if phase_status == "IN_PROGRESS":
+            plan["current_phase"] = phase_id
+
+        self.save(plan)
+        return {
+            "created": True,
+            "phase_id": phase_id,
+            "tasks_created": len(tasks),
+            "phase_status": phase_status,
+            "message": "Phase created",
+        }
