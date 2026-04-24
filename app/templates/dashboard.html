@@ -3,7 +3,7 @@
 {% block title %}Dashboard{% endblock %}
 
 {% block content %}
-<div class="dashboard-wrap premium-dashboard dashboard-v6">
+<div class="dashboard-wrap premium-dashboard dashboard-v6 glassmorphism">
   <section class="hero-banner hero-banner-v6">
     <div class="hero-left">
       <h1>👋 Welcome back, {{ user_display_name }}</h1>
@@ -84,7 +84,7 @@
   </section>
 
   <section class="panel-grid">
-    <article class="panel premium-panel">
+    <article class="panel premium-panel patch-health">
       <div class="panel-head">
         <h3>📋 Recent Activity</h3>
         <a href="{{ url_for('patchwise.patchwise_home') }}" class="panel-link">View All</a>

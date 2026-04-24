@@ -9,6 +9,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify, render_template, request
 
 from app.models import TriageSession, db
+from app.services.activity_service import log_activity
 
 
 triage_bp = Blueprint("triage", __name__)
@@ -106,4 +107,5 @@ def triage_analyze():
     )
     db.session.add(session)
     db.session.commit()
+    log_activity("Triage session completed", "triage")
     return jsonify(result)

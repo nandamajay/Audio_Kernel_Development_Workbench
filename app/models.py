@@ -116,3 +116,12 @@ class UpstreamPatch(db.Model):
     tags = db.Column(db.String(256))
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ActivityLog(db.Model):
+    __tablename__ = "activity_log"
+
+    id = db.Column(db.Integer, primary_key=True)
+    event = db.Column(db.String(500), nullable=False)
+    event_type = db.Column(db.String(50), nullable=False, default="agent")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)

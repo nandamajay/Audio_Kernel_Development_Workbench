@@ -16,7 +16,7 @@ from app.config import (
     get_default_model,
     get_user_display_name,
 )
-from app.models import ConversionJob, ReviewSession, TriageSession
+from app.models import ActivityLog, ConversionJob, ReviewSession, TriageSession, UpstreamPatch
 from app.services.env_service import (
     current_username,
     load_env_values,
@@ -105,12 +105,21 @@ def dashboard():
 
 @dashboard_bp.get("/api/dashboard/stats")
 def dashboard_stats():
+    merged = UpstreamPatch.query.filter(UpstreamPatch.status.in_(["merged", "accepted"])).count()
+    in_review = UpstreamPatch.query.filter_by(status="under_review").count()
+    needs_revision = UpstreamPatch.query.filter_by(status="changes_requested").count()
     return jsonify(
         {
             "patches_reviewed": ReviewSession.query.count(),
             "drivers_converted": ConversionJob.query.count(),
             "triage_sessions": TriageSession.query.count(),
+            "upstream_patches": UpstreamPatch.query.count(),
             "last_git_activity": _latest_git_activity(),
+            "patch_health": {
+                "merged": merged,
+                "in_review": in_review,
+                "needs_revision": needs_revision,
+            },
         }
     )
 
@@ -119,7 +128,17 @@ def dashboard_stats():
 def dashboard_activity():
     events = []
 
-    for row in ReviewSession.query.order_by(ReviewSession.created_at.desc()).limit(5).all():
+    for row in ActivityLog.query.order_by(ActivityLog.created_at.desc()).limit(10).all():
+        events.append(
+            {
+                "type": row.event_type or "agent",
+                "desc": row.event or "Activity",
+                "time": _relative_time(row.created_at),
+                "sort_ts": row.created_at.timestamp() if row.created_at else 0,
+            }
+        )
+
+    for row in ReviewSession.query.order_by(ReviewSession.created_at.desc()).limit(3).all():
         label = getattr(row, "patch_filename", None) or row.session_id
         events.append(
             {
@@ -130,7 +149,7 @@ def dashboard_activity():
             }
         )
 
-    for row in TriageSession.query.order_by(TriageSession.created_at.desc()).limit(5).all():
+    for row in TriageSession.query.order_by(TriageSession.created_at.desc()).limit(3).all():
         desc = "Triaged crash log"
         if row.input_payload:
             first_line = (row.input_payload.splitlines() or [""])[0].strip()
@@ -145,7 +164,7 @@ def dashboard_activity():
             }
         )
 
-    for row in ConversionJob.query.order_by(ConversionJob.created_at.desc()).limit(5).all():
+    for row in ConversionJob.query.order_by(ConversionJob.created_at.desc()).limit(3).all():
         events.append(
             {
                 "type": "convert",
