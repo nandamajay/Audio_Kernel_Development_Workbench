@@ -75,6 +75,9 @@ class ReviewSession(db.Model):
     findings_json = db.Column(db.Text, nullable=False, default="[]")
     checkpatch_output = db.Column(db.Text, nullable=True)
     maintainers_json = db.Column(db.Text, nullable=True, default="[]")
+    patch_filename = db.Column(db.String(255), nullable=True)
+    status = db.Column(db.String(24), nullable=False, default="pending")
+    ai_summary = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(
         db.DateTime,

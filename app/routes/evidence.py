@@ -107,7 +107,7 @@ def save_lkml():
         finding_id=finding_id,
         evidence_type="lkml",
         content=url,
-        metadata_json=json.dumps({"title": title, "author": author, "date": date}),
+        metadata_json=json.dumps({"title": title, "author": author, "date": date, "lkml_url": url}),
     )
     db.session.add(row)
     db.session.commit()

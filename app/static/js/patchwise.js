@@ -225,6 +225,42 @@ window.AKDWPatchwise = (function () {
     box.innerHTML += '<div style="margin-top:8px;"><strong>Maintainers</strong><div style="margin-top:6px;">' + cards + "</div></div>";
   }
 
+  async function loadSessionList() {
+    const root = document.getElementById("patchSessions");
+    if (!root) return;
+    const res = await fetch("/api/patchwise/sessions");
+    const data = await res.json();
+    const rows = data.sessions || [];
+    root.innerHTML = "";
+    if (!rows.length) {
+      root.innerHTML = '<div class="small-muted">No sessions yet.</div>';
+      return;
+    }
+    rows.slice(0, 10).forEach(function (item) {
+      const entry = document.createElement("button");
+      entry.type = "button";
+      entry.className = "session-entry";
+      const label = (item.patch_filename || item.session_id || "").slice(0, 26);
+      const status = item.status || "pending";
+      entry.innerHTML = '<span>' + escapeHtml(label) + '</span><span class="status-badge ' + escapeHtml(status) + '">' +
+        escapeHtml(status) + "</span>";
+      entry.addEventListener("click", async function () {
+        const detailRes = await fetch("/api/patchwise/session/" + encodeURIComponent(item.session_id));
+        const detail = await detailRes.json();
+        if (!detail.ok || !detail.session) return;
+        sessionId = item.session_id;
+        localStorage.setItem(sessionKey, sessionId);
+        document.getElementById("patchContent").value = "";
+        renderFindings(detail.session.findings || [], detail.session.summary || {});
+        document.getElementById("reviewPlaceholder").style.display = "none";
+        hasResults = (detail.session.findings || []).length > 0;
+        setStepState(true, hasResults);
+        setActionState();
+      });
+      root.appendChild(entry);
+    });
+  }
+
   function renderFindings(findings, summary) {
     const box = document.getElementById("reviewFindings");
     const sum = document.getElementById("reviewSummary");
@@ -424,8 +460,11 @@ window.AKDWPatchwise = (function () {
     setStepState(true, true);
     setActionState();
     renderFindings(data.findings || [], data.summary || {});
-    const maintainers = await fetchMaintainersFromPatch(patchContent);
+    const maintainers = Array.isArray(data.maintainers) && data.maintainers.length
+      ? data.maintainers
+      : await fetchMaintainersFromPatch(patchContent);
     renderMaintainers(maintainers);
+    loadSessionList();
   }
 
   async function runCheckpatch() {
@@ -454,6 +493,7 @@ window.AKDWPatchwise = (function () {
     link.click();
     URL.revokeObjectURL(link.href);
     link.remove();
+    loadSessionList();
   }
 
   async function askReviewer() {
@@ -547,6 +587,7 @@ window.AKDWPatchwise = (function () {
     renderFiles();
     refreshPath();
     setActionState();
+    loadSessionList();
   }
 
   return { init: init };

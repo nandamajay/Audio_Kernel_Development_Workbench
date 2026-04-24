@@ -253,6 +253,44 @@
     text-underline-offset: 2px;
   }
 
+  .patch-session-list {
+    margin-top: 10px;
+    border-top: 1px solid var(--glass-border);
+    padding-top: 10px;
+    display: grid;
+    gap: 6px;
+  }
+
+  .session-entry {
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    padding: 6px 8px;
+    background: rgba(255, 255, 255, 0.02);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+  }
+
+  .status-badge {
+    border-radius: 999px;
+    padding: 2px 8px;
+    border: 1px solid var(--glass-border);
+    color: var(--text-muted);
+    font-size: 11px;
+  }
+
+  .status-badge.reviewed {
+    border-color: rgba(59, 130, 246, 0.5);
+    color: #bfdbfe;
+  }
+
+  .status-badge.exported {
+    border-color: rgba(16, 185, 129, 0.5);
+    color: #baf7df;
+  }
+
   @media (max-width: 1300px) {
     .patchwise-grid {
       grid-template-columns: 1fr;
@@ -299,6 +337,10 @@
       <input type="file" id="pw-file-input" accept=".c,.h,.dts,.dtsi,.patch,.log,.txt,.diff" multiple style="display:none">
       <div id="patchDropZone" class="drop-zone">Drop patch/source/log files here</div>
       <div id="patchFileList" class="file-tree"></div>
+      <div class="patch-session-list">
+        <div class="small-muted">Recent Sessions</div>
+        <div id="patchSessions"></div>
+      </div>
     </aside>
 
     <section class="patchwise-center">

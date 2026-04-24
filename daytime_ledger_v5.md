@@ -59,3 +59,15 @@ Generated: 2026-04-24
 - Status: PASS
 - Report generated: `/local/mnt/workspace/AKDW/daytime_report_v5.html`
 - Email delivery: PASS (`localhost:25` relay)
+
+## Section 8 — Auto-Advance Decision
+- Status: PASS
+- COUNT_FAILED = 0
+- Decision: ✅ ALL SECTIONS PASSED — Advancing to Phase 3 continuation
+
+## Phase 3 Continuation
+- Status: PASS
+- P3-1 Maintainer workflow: `get_maintainers` role parsing + frontend maintainer mailto cards in Patchwise results.
+- P3-2 LKML deep link: per-finding "Find on LKML" button + LKML URL persisted in evidence metadata.
+- P3-3 Export upgrade: metadata header, per-finding cards, maintainers, evidence, checkpatch output, AI summary.
+- P3-4 Session persistence: review session schema extended (`patch_filename`, `status`, `ai_summary`), sessions API sorted by `updated_at`, UI sessions list with status badges.
