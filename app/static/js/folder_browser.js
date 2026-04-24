@@ -1,6 +1,7 @@
 window.AKDWFolderBrowser = (function () {
   let modal = null;
   let entriesBox = null;
+  let rootsBox = null;
   let pathInput = null;
   let statusEl = null;
   let selectBtn = null;
@@ -60,11 +61,33 @@ window.AKDWFolderBrowser = (function () {
     });
   }
 
+  async function loadRoots() {
+    if (!rootsBox) return;
+    rootsBox.innerHTML = '';
+    try {
+      const res = await fetch('/api/fs/roots');
+      const data = await res.json();
+      (data.roots || []).forEach(function (item) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn-secondary';
+        btn.textContent = '📁 ' + (item.label || item.path);
+        btn.addEventListener('click', function () {
+          browse(item.path);
+        });
+        rootsBox.appendChild(btn);
+      });
+    } catch (err) {
+      rootsBox.innerHTML = '';
+    }
+  }
+
   function ensureInit() {
     if (initialized) return;
     modal = document.getElementById('folderBrowserModal');
     if (!modal) return;
     entriesBox = document.getElementById('folderBrowserEntries');
+    rootsBox = document.getElementById('folderBrowserRoots');
     pathInput = document.getElementById('folderBrowserPath');
     statusEl = document.getElementById('folderBrowserStatus');
     selectBtn = document.getElementById('folderBrowserSelect');
@@ -95,6 +118,7 @@ window.AKDWFolderBrowser = (function () {
     currentPath = config.startPath || currentPath || '/app/kernel';
     onSelect = typeof config.onSelect === 'function' ? config.onSelect : function () {};
     modal.hidden = false;
+    loadRoots();
     browse(currentPath);
   }
 

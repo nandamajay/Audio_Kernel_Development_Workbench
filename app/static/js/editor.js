@@ -5,104 +5,42 @@ window.AKDWEditor = (function () {
   let activeModel = null;
   let activePath = null;
   let attachedFiles = [];
+  let sessionPrimed = false;
+
+  window.monacoReady = false;
+  window.monacoEditor = null;
 
   function languageFromPath(path) {
-    const name = (path || '').toLowerCase();
-    if (name.endsWith('.c') || name.endsWith('.h')) return 'c';
-    if (name.endsWith('.dts') || name.endsWith('.dtsi')) return 'plaintext';
-    if (name.endsWith('/kconfig') || name.endsWith('kconfig')) return 'plaintext';
-    if (name.endsWith('/makefile') || name.endsWith('makefile')) return 'makefile';
-    return 'plaintext';
+    const lower = (path || "").toLowerCase();
+    const ext = lower.includes(".") ? lower.split(".").pop() : "";
+    const langMap = {
+      c: "c",
+      h: "c",
+      patch: "diff",
+      diff: "diff",
+      dts: "dts",
+      dtsi: "dts",
+      txt: "plaintext",
+      py: "python",
+    };
+    return langMap[ext] || "plaintext";
   }
 
   function setStatus(text) {
-    const el = document.getElementById('status-last-action');
-    if (el) el.textContent = 'Last action: ' + text;
+    const el = document.getElementById("status-last-action");
+    if (el) el.textContent = "Last action: " + text;
   }
 
-  async function listPath(path) {
-    const res = await fetch('/api/fs/browse?path=' + encodeURIComponent(path));
-    return res.json();
-  }
-
-  async function loadTree(path) {
-    const data = await listPath(path);
-    const list = document.getElementById('fileTree');
-    list.innerHTML = '';
-
-    if (!data.ok) {
-      list.innerHTML = '<div class="small-muted">' + (data.error || 'Unable to load tree') + '</div>';
-      return;
-    }
-
-    activePath = data.path;
-    localStorage.setItem('akdw_editor_path', activePath);
-    document.getElementById('pathInput').value = activePath;
-
-    data.entries.forEach(function (item) {
-      const row = document.createElement('button');
-      row.className = 'tree-row';
-      row.textContent = (item.type === 'dir' ? '📁 ' : '📄 ') + item.name;
-      row.onclick = function () {
-        if (item.type === 'dir') {
-          loadTree(item.path);
-          return;
-        }
-        openFile(item.path);
-      };
-      list.appendChild(row);
-    });
-  }
-
-  async function openFile(path) {
-    const res = await fetch('/api/fs/read?path=' + encodeURIComponent(path));
-    const data = await res.json();
-    if (!data.ok) {
-      setStatus(data.error || 'Open failed');
-      return;
-    }
-    const model = monaco.editor.createModel(data.content || '', languageFromPath(path));
-    editor.setModel(model);
-    document.getElementById('currentFile').textContent = path;
-    setStatus('Opened ' + path);
-  }
-
-  async function saveCurrentFile() {
-    const path = document.getElementById('currentFile').textContent;
-    if (!path || path === '(none)') {
-      setStatus('No file selected');
-      return;
-    }
-    const res = await fetch('/api/fs/write', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ path: path, content: editor.getValue() }),
-    });
-    const data = await res.json();
-    setStatus(data.ok ? 'Saved ' + path : (data.error || 'Save failed'));
-  }
-
-  function renderAttachments() {
-    const box = document.getElementById('attachPills');
-    box.innerHTML = '';
-    attachedFiles.forEach(function (file, idx) {
-      const pill = document.createElement('span');
-      pill.className = 'file-pill';
-      pill.textContent = '📎 ' + file.filename;
-      const close = document.createElement('button');
-      close.textContent = '×';
-      close.onclick = function () {
-        attachedFiles.splice(idx, 1);
-        renderAttachments();
-      };
-      pill.appendChild(close);
-      box.appendChild(pill);
-    });
+  function setSessionLabel(value) {
+    const editorLabel = document.getElementById("editorSessionLabel");
+    if (editorLabel) editorLabel.textContent = value || "unknown";
+    const topbarLabel = document.getElementById("active-session");
+    if (topbarLabel) topbarLabel.textContent = value || "unknown";
   }
 
   function linkifyText(text) {
-    return (text || "").replace(
-      /(https?:\/\/[^\s<>"]+)/g,
+    return String(text || "").replace(
+      /(https?:\/\/[^\s<>"']+)/g,
       '<a href="$1" target="_blank" rel="noopener noreferrer" class="chat-link">$1 ↗</a>'
     );
   }
@@ -113,21 +51,81 @@ window.AKDWEditor = (function () {
     const renderer = new window.marked.Renderer();
     renderer.link = function (href, title, txt) {
       const tip = title || href;
-      return '<a href="' + href + '" target="_blank" rel="noopener noreferrer" class="chat-link" title="' + tip + '">' +
-        (txt || href) + ' ↗</a>';
+      return (
+        '<a href="' +
+        href +
+        '" target="_blank" rel="noopener noreferrer" class="chat-link" title="' +
+        tip +
+        '">' +
+        (txt || href) +
+        " ↗</a>"
+      );
     };
     window.marked.setOptions({ renderer: renderer, breaks: true });
     return window.marked.parse(linked);
   }
 
+  function copyResponse(btn) {
+    const root = btn.closest(".chat-row.assistant");
+    const content = root ? root.querySelector(".msg-content") : null;
+    const text = content ? content.innerText : "";
+    navigator.clipboard.writeText(text).then(function () {
+      btn.textContent = "✅";
+      setTimeout(function () {
+        btn.textContent = "📋";
+      }, 1500);
+    });
+  }
+
+  function prefillShellCommand(cmd) {
+    const input = document.getElementById("shellCmdInput");
+    if (!input) return;
+    input.value = cmd;
+    const status = document.getElementById("shellStatus");
+    if (status) status.textContent = "Command prefilled from assistant response.";
+  }
+
+  function attachRunButtons(container) {
+    const allowed = /^(git|ls|cat|grep|find|checkpatch\.pl|make|diff|patch)\b/m;
+    container.querySelectorAll("pre > code").forEach(function (code) {
+      const pre = code.parentElement;
+      if (!pre || pre.previousElementSibling && pre.previousElementSibling.classList.contains("run-this-btn")) {
+        return;
+      }
+      const raw = (code.textContent || "").trim();
+      const firstLine = raw.split("\n")[0].trim();
+      if (!allowed.test(firstLine)) return;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn-secondary run-this-btn";
+      btn.textContent = "▶ Run this";
+      btn.style.marginBottom = "6px";
+      btn.addEventListener("click", function () {
+        prefillShellCommand(firstLine);
+      });
+      pre.parentNode.insertBefore(btn, pre);
+    });
+  }
+
   function addChatBubble(role, content) {
-    const list = document.getElementById('chatMessages');
-    const row = document.createElement('div');
-    row.className = role === 'user' ? 'chat-row user' : 'chat-row assistant';
-    if (role === 'assistant') {
-      row.innerHTML = renderMarkdown(content || '');
+    const list = document.getElementById("chatMessages");
+    const row = document.createElement("div");
+    row.className = role === "user" ? "chat-row user" : "chat-row assistant";
+    if (role === "assistant") {
+      row.innerHTML =
+        '<button class="copy-btn" type="button" title="Copy response">📋</button>' +
+        '<div class="msg-content">' +
+        renderMarkdown(content || "") +
+        "</div>";
+      const copyBtn = row.querySelector(".copy-btn");
+      if (copyBtn) {
+        copyBtn.addEventListener("click", function () {
+          copyResponse(copyBtn);
+        });
+      }
+      attachRunButtons(row);
     } else {
-      row.textContent = content;
+      row.textContent = content || "";
     }
     list.appendChild(row);
     list.scrollTop = list.scrollHeight;
@@ -135,55 +133,30 @@ window.AKDWEditor = (function () {
 
   function stepTitle(stepType) {
     const labels = {
-      thinking: '🟣 THINKING',
-      tool_call: '🔵 TOOL CALL',
-      tool_result: '🟢 TOOL RESULT',
-      response: '⬜ RESPONSE',
+      thinking: "🟣 THINKING",
+      tool_call: "🔵 TOOL CALL",
+      tool_result: "🟢 TOOL RESULT",
+      response: "⬜ RESPONSE",
     };
-    return labels[stepType] || '⬜ RESPONSE';
+    return labels[stepType] || "⬜ RESPONSE";
   }
 
   function addStepCard(step) {
-    const list = document.getElementById('stepCards');
-    const card = document.createElement('details');
-    card.className = 'step-card ' + (step.type || 'response');
-    card.open = step.type !== 'thinking';
+    const list = document.getElementById("stepCards");
+    const card = document.createElement("details");
+    card.className = "step-card " + (step.type || "response");
+    card.open = step.type !== "thinking";
 
-    const summary = document.createElement('summary');
-    summary.textContent = stepTitle(step.type || 'response') + '  [' + (step.timestamp || '') + ']';
+    const summary = document.createElement("summary");
+    summary.textContent = stepTitle(step.type || "response") + " [" + (step.timestamp || "") + "]";
 
-    const body = document.createElement('div');
-    body.className = 'step-body';
-
-    if (step.type === 'tool_call') {
-      const pre = document.createElement('pre');
-      const args = step.tool_args && Object.keys(step.tool_args).length ? JSON.stringify(step.tool_args, null, 2) : '{}';
-      pre.textContent = 'Tool: ' + (step.tool_name || 'unknown') + '\nArgs: ' + args;
-      body.appendChild(pre);
-    } else if (step.type === 'tool_result') {
-      const text = step.content || '';
-      const lines = text.split('\n');
-      const pre = document.createElement('pre');
-      pre.textContent = lines.slice(0, 3).join('\n');
-      body.appendChild(pre);
-      if (lines.length > 3) {
-        const btn = document.createElement('button');
-        btn.className = 'btn-secondary';
-        btn.textContent = 'Show more';
-        btn.onclick = function () {
-          const expanded = btn.dataset.expanded === '1';
-          pre.textContent = expanded ? lines.slice(0, 3).join('\n') : text;
-          btn.textContent = expanded ? 'Show more' : 'Show less';
-          btn.dataset.expanded = expanded ? '0' : '1';
-        };
-        body.appendChild(btn);
-      }
-    } else if (step.type === 'response' && window.marked) {
-      body.innerHTML = window.marked.parse(step.content || '');
+    const body = document.createElement("div");
+    body.className = "step-body";
+    if (step.type === "response") {
+      body.innerHTML = renderMarkdown(step.content || "");
     } else {
-      const pre = document.createElement('pre');
-      pre.style.fontStyle = step.type === 'thinking' ? 'italic' : 'normal';
-      pre.textContent = step.content || '';
+      const pre = document.createElement("pre");
+      pre.textContent = step.content || "";
       body.appendChild(pre);
     }
 
@@ -193,47 +166,199 @@ window.AKDWEditor = (function () {
     list.scrollTop = list.scrollHeight;
   }
 
-  function sendQuery(messageOverride, selectedCode) {
-    const input = document.getElementById('chatInput');
-    const message = (messageOverride || input.value || '').trim();
+  async function listPath(path) {
+    const res = await fetch("/api/fs/browse?path=" + encodeURIComponent(path));
+    return res.json();
+  }
+
+  async function loadTree(path) {
+    const data = await listPath(path);
+    const list = document.getElementById("fileTree");
+    list.innerHTML = "";
+
+    if (!data.ok) {
+      list.innerHTML = '<div class="small-muted">' + (data.error || "Unable to load tree") + "</div>";
+      return;
+    }
+
+    activePath = data.path;
+    localStorage.setItem("akdw_editor_path", activePath);
+    document.getElementById("pathInput").value = activePath;
+
+    data.entries.forEach(function (item) {
+      const row = document.createElement("button");
+      row.className = "tree-row";
+      row.textContent = (item.type === "dir" ? "📁 " : "📄 ") + item.name;
+      row.onclick = function () {
+        if (item.type === "dir") {
+          loadTree(item.path);
+          return;
+        }
+        openFile(item.path);
+      };
+      list.appendChild(row);
+    });
+  }
+
+  function openFileWithContent(filename, content, retryCount) {
+    const retries = retryCount || 0;
+    if (!window.monacoReady || !window.monacoEditor || !editor) {
+      if (retries < 20) {
+        setTimeout(function () {
+          openFileWithContent(filename, content, retries + 1);
+        }, 300);
+      }
+      return;
+    }
+    const lang = languageFromPath(filename);
+    const model = monaco.editor.createModel(content || "", lang);
+    window.monacoEditor.setModel(model);
+    window.monacoEditor.layout();
+    window.monacoEditor.revealLine(1);
+    document.getElementById("currentFile").textContent = filename;
+    setStatus("Opened " + filename);
+  }
+
+  async function openFile(path) {
+    const res = await fetch("/api/fs/read?path=" + encodeURIComponent(path));
+    const data = await res.json();
+    if (!data.ok) {
+      setStatus(data.error || "Open failed");
+      return;
+    }
+    openFileWithContent(path, data.content || "", 0);
+  }
+
+  async function saveCurrentFile() {
+    const path = document.getElementById("currentFile").textContent;
+    if (!path || path === "(none)") {
+      setStatus("No file selected");
+      return;
+    }
+    const res = await fetch("/api/fs/write", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: path, content: editor.getValue() }),
+    });
+    const data = await res.json();
+    setStatus(data.ok ? "Saved " + path : data.error || "Save failed");
+  }
+
+  function renderAttachments() {
+    const box = document.getElementById("attachPills");
+    box.innerHTML = "";
+    attachedFiles.forEach(function (file, idx) {
+      const pill = document.createElement("span");
+      pill.className = "file-pill";
+      pill.textContent = "📎 " + file.filename;
+      const close = document.createElement("button");
+      close.textContent = "×";
+      close.onclick = function () {
+        attachedFiles.splice(idx, 1);
+        renderAttachments();
+      };
+      pill.appendChild(close);
+      box.appendChild(pill);
+    });
+  }
+
+  async function ensureEditorSession() {
+    if (sessionId) return sessionId;
+    const res = await fetch("/api/agent/new_session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ page: "editor" }),
+    });
+    const data = await res.json();
+    sessionId = data.session_id;
+    localStorage.setItem("akdw_editor_session", sessionId);
+    setSessionLabel(sessionId);
+    if (socket) {
+      socket.emit("join_agent_session", { session_id: sessionId });
+    }
+    return sessionId;
+  }
+
+  async function primeEditorContext() {
+    if (sessionPrimed) return;
+    await ensureEditorSession();
+    const currentFile = document.getElementById("currentFile").textContent || "(none)";
+    await fetch("/api/agent/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: sessionId,
+        page: "editor",
+        model: activeModel,
+        message: "System: The user is editing " + currentFile + ". Assist with kernel driver code questions.",
+      }),
+    });
+    sessionPrimed = true;
+  }
+
+  async function sendQuery(messageOverride, selectedCode) {
+    const input = document.getElementById("chatInput");
+    const message = (messageOverride || input.value || "").trim();
     if (!message && attachedFiles.length === 0) return;
 
-    addChatBubble('user', message || '(attachments)');
-    input.value = '';
+    await ensureEditorSession();
+    await primeEditorContext();
 
-    socket.emit('editor_query', {
-      session_id: sessionId,
-      model: activeModel,
-      message: message,
-      attachments: attachedFiles,
-      selected_code: selectedCode || '',
-      filename: document.getElementById('currentFile').textContent,
+    const filename = document.getElementById("currentFile").textContent || "(none)";
+    let outbound = message;
+    if (selectedCode && selectedCode.trim()) {
+      outbound += "\n\nSelected code from " + filename + ":\n" + selectedCode;
+    }
+
+    addChatBubble("user", message || "(attachments)");
+    input.value = "";
+    addStepCard({ type: "thinking", content: "Analysing request...", timestamp: new Date().toLocaleTimeString() });
+
+    const res = await fetch("/api/agent/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: sessionId,
+        page: "editor",
+        model: activeModel,
+        message: outbound,
+        attachments: attachedFiles,
+        selected_code: selectedCode || "",
+        filename: filename,
+      }),
     });
+    const data = await res.json();
+    const answer = (data.response || data.content || data.message || "").trim() || "⚠️ No response received. Please retry.";
+    addChatBubble("assistant", answer);
+    addStepCard({ type: "response", content: answer, timestamp: new Date().toLocaleTimeString() });
     attachedFiles = [];
     renderAttachments();
   }
 
   function initMonaco() {
-    require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs' } });
-    require(['vs/editor/editor.main'], function () {
-      editor = monaco.editor.create(document.getElementById('editorPane'), {
-        value: '',
-        language: 'c',
-        theme: 'vs-dark',
+    window.monacoReady = false;
+    require.config({ paths: { vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs" } });
+    require(["vs/editor/editor.main"], function () {
+      editor = monaco.editor.create(document.getElementById("editorPane"), {
+        value: "",
+        language: "c",
+        theme: "vs-dark",
         automaticLayout: true,
         minimap: { enabled: true },
       });
+      window.monacoEditor = editor;
+      window.monacoReady = true;
 
       editor.addAction({
-        id: 'ask-qgenie',
-        label: 'Ask QGenie',
-        contextMenuGroupId: 'navigation',
+        id: "ask-qgenie",
+        label: "Ask QGenie",
+        contextMenuGroupId: "navigation",
         contextMenuOrder: 1.1,
         run: function () {
           const selection = editor.getSelection();
           const selectedCode = editor.getModel().getValueInRange(selection).trim();
           if (!selectedCode) return;
-          sendQuery('Please review this selected code.', selectedCode);
+          sendQuery("Please review this selected code.", selectedCode);
         },
       });
     });
@@ -241,145 +366,197 @@ window.AKDWEditor = (function () {
 
   async function uploadFile(file) {
     const form = new FormData();
-    form.append('file', file);
-    form.append('target_dir', activePath || '/app/workspace');
-    const res = await fetch('/editor/api/fs/upload', { method: 'POST', body: form });
+    form.append("file", file);
+    form.append("target_dir", activePath || "/app/workspace");
+    const res = await fetch("/editor/api/fs/upload", { method: "POST", body: form });
     const data = await res.json();
     if (!data.ok) {
-      setStatus(data.error || 'Upload failed');
+      setStatus(data.error || "Upload failed");
       return;
     }
 
-    const lower = (data.filename || '').toLowerCase();
-    if (['.c', '.h', '.dts', '.dtsi'].some(function (ext) { return lower.endsWith(ext); })) {
-      const model = monaco.editor.createModel(data.content || '', languageFromPath(data.filename));
-      editor.setModel(model);
-      document.getElementById('currentFile').textContent = data.path;
+    const lower = (data.filename || "").toLowerCase();
+    if ([".c", ".h", ".dts", ".dtsi", ".patch", ".diff", ".txt", ".py"].some(function (ext) { return lower.endsWith(ext); })) {
+      openFileWithContent(data.path || data.filename, data.content || "", 0);
     } else {
       attachedFiles.push({ filename: data.filename, content: data.content });
       renderAttachments();
     }
-    setStatus('Uploaded ' + data.filename);
+    setStatus("Uploaded " + data.filename);
   }
 
   function wireDnD() {
-    const zone = document.getElementById('dropZone');
-    ['dragenter', 'dragover'].forEach(function (evt) {
-      zone.addEventListener(evt, function (e) { e.preventDefault(); zone.classList.add('dragging'); });
+    const zone = document.getElementById("dropZone");
+    ["dragenter", "dragover"].forEach(function (evt) {
+      zone.addEventListener(evt, function (e) {
+        e.preventDefault();
+        zone.classList.add("dragging");
+      });
     });
-    ['dragleave', 'drop'].forEach(function (evt) {
-      zone.addEventListener(evt, function (e) { e.preventDefault(); zone.classList.remove('dragging'); });
+    ["dragleave", "drop"].forEach(function (evt) {
+      zone.addEventListener(evt, function (e) {
+        e.preventDefault();
+        zone.classList.remove("dragging");
+      });
     });
-    zone.addEventListener('drop', function (e) {
-      const files = Array.from(e.dataTransfer.files || []);
+    zone.addEventListener("drop", function (e) {
+      const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
       files.forEach(uploadFile);
     });
 
-    const picker = document.getElementById('fileInput');
-    picker.addEventListener('change', function () {
+    const picker = document.getElementById("fileInput");
+    picker.addEventListener("change", function () {
       Array.from(picker.files || []).forEach(uploadFile);
-      picker.value = '';
+      picker.value = "";
     });
   }
 
-  function init(opts) {
-    sessionId = localStorage.getItem('akdw_editor_session') || opts.sessionId;
-    localStorage.setItem('akdw_editor_session', sessionId);
+  async function runShellCommand() {
+    const input = document.getElementById("shellCmdInput");
+    const output = document.getElementById("shellOutput");
+    const runBtn = document.getElementById("shellRunBtn");
+    const status = document.getElementById("shellStatus");
+    const cmd = (input.value || "").trim();
+    if (!cmd) return;
 
-    activeModel = localStorage.getItem('akdw_editor_model') || opts.defaultModel;
-    document.getElementById('modelSelect').value = activeModel;
+    runBtn.disabled = true;
+    runBtn.innerHTML = '<span class="send-spinner"></span>';
+    status.textContent = "Running...";
+    const cwd = activePath || document.getElementById("pathInput").value || "/app/kernel";
+    const res = await fetch("/api/editor/shell", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cmd: cmd, cwd: cwd }),
+    });
+    const data = await res.json();
+    const header = "$ " + cmd + " (cwd: " + cwd + ")\n";
+    const body = (data.output || data.error || "").trim();
+    output.textContent = header + body + "\n";
+    output.scrollTop = output.scrollHeight;
+    status.textContent = data.ok ? "✅ Completed (" + data.returncode + ")" : "❌ " + (data.error || "Failed");
+    runBtn.disabled = false;
+    runBtn.textContent = "Run";
+  }
 
+  function initShellPanel() {
+    const toggle = document.getElementById("shellPanelToggle");
+    const body = document.getElementById("shellPanelBody");
+    const runBtn = document.getElementById("shellRunBtn");
+    const cmdInput = document.getElementById("shellCmdInput");
+    if (!toggle || !body || !runBtn || !cmdInput) return;
+
+    toggle.addEventListener("click", function () {
+      const hidden = body.style.display === "none";
+      body.style.display = hidden ? "grid" : "none";
+      toggle.textContent = hidden ? "▼" : "▶";
+    });
+    runBtn.addEventListener("click", runShellCommand);
+    cmdInput.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        runShellCommand();
+      }
+    });
+  }
+
+  function initSocketHandlers() {
     socket = io();
-    socket.emit('join_agent_session', { session_id: sessionId });
-
     window.AKDWTerminal.init({
-      containerId: 'terminalPane',
+      containerId: "terminalPane",
       socket: socket,
-      sessionId: sessionId,
+      sessionId: sessionId || "editor-live",
     });
 
-    socket.on('agent_step', function (msg) {
-      if (!msg || msg.session_id !== sessionId) return;
+    socket.on("agent_step", function (msg) {
+      if (!msg || !sessionId || msg.session_id !== sessionId) return;
       addStepCard(msg);
-      if (msg.type === 'response') addChatBubble('assistant', msg.content || '');
     });
 
-    socket.on('file_diff', function (msg) {
-      if (!msg || msg.session_id !== sessionId) return;
-      document.getElementById('diffPanel').style.display = 'block';
+    socket.on("file_diff", function (msg) {
+      if (!msg || !sessionId || msg.session_id !== sessionId) return;
+      document.getElementById("diffPanel").style.display = "block";
       window.AKDWDiff.showDiff(msg);
-      document.getElementById('diffFilename').textContent = msg.filename || '';
+      document.getElementById("diffFilename").textContent = msg.filename || "";
     });
+  }
 
-    document.getElementById('sendBtn').addEventListener('click', function () { sendQuery(); });
-    document.getElementById('chatInput').addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' && !e.shiftKey) {
+  async function init(opts) {
+    activeModel = localStorage.getItem("akdw_editor_model") || opts.defaultModel;
+    document.getElementById("modelSelect").value = activeModel;
+    setSessionLabel("initializing...");
+
+    initSocketHandlers();
+    initMonaco();
+    window.AKDWDiff.init("diffEditor");
+    wireDnD();
+    initShellPanel();
+
+    document.getElementById("sendBtn").addEventListener("click", function () { sendQuery(); });
+    document.getElementById("chatInput").addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         sendQuery();
       }
     });
 
-    document.getElementById('saveFileBtn').addEventListener('click', saveCurrentFile);
-    document.getElementById('applyPathBtn').addEventListener('click', function () {
-      loadTree(document.getElementById('pathInput').value);
+    document.getElementById("saveFileBtn").addEventListener("click", saveCurrentFile);
+    document.getElementById("applyPathBtn").addEventListener("click", function () {
+      loadTree(document.getElementById("pathInput").value);
     });
-    document.getElementById('browsePathBtn').addEventListener('click', function () {
+    document.getElementById("browsePathBtn").addEventListener("click", function () {
       if (!window.AKDWFolderBrowser) {
-        loadTree(document.getElementById('pathInput').value);
+        loadTree(document.getElementById("pathInput").value);
         return;
       }
       window.AKDWFolderBrowser.open({
-        startPath: document.getElementById('pathInput').value || '/app/kernel',
+        startPath: document.getElementById("pathInput").value || "/app/kernel",
         onSelect: function (selectedPath) {
-          document.getElementById('pathInput').value = selectedPath;
+          document.getElementById("pathInput").value = selectedPath;
           loadTree(selectedPath);
         },
       });
     });
 
-    document.getElementById('modelSelect').addEventListener('change', function (e) {
+    document.getElementById("modelSelect").addEventListener("change", function (e) {
       activeModel = e.target.value;
-      localStorage.setItem('akdw_editor_model', activeModel);
+      localStorage.setItem("akdw_editor_model", activeModel);
     });
 
-    document.getElementById('acceptDiffBtn').addEventListener('click', async function () {
-      const path = window.AKDWDiff.getActiveFile() || document.getElementById('currentFile').textContent;
+    document.getElementById("acceptDiffBtn").addEventListener("click", async function () {
+      const path = window.AKDWDiff.getActiveFile() || document.getElementById("currentFile").textContent;
       const content = window.AKDWDiff.getModified();
-      if (!path || path === '(none)') return;
-      await fetch('/api/fs/write', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+      if (!path || path === "(none)") return;
+      await fetch("/api/fs/write", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path: path, content: content }),
       });
-      setStatus('Accepted diff into ' + path);
-      document.getElementById('diffPanel').style.display = 'none';
+      setStatus("Accepted diff into " + path);
+      document.getElementById("diffPanel").style.display = "none";
       openFile(path);
     });
 
-    document.getElementById('rejectDiffBtn').addEventListener('click', function () {
-      document.getElementById('diffPanel').style.display = 'none';
+    document.getElementById("rejectDiffBtn").addEventListener("click", function () {
+      document.getElementById("diffPanel").style.display = "none";
     });
 
-    document.getElementById('saveDiffBtn').addEventListener('click', async function () {
-      const path = window.AKDWDiff.getActiveFile() || document.getElementById('currentFile').textContent;
-      if (!path || path === '(none)') return;
+    document.getElementById("saveDiffBtn").addEventListener("click", async function () {
+      const path = window.AKDWDiff.getActiveFile() || document.getElementById("currentFile").textContent;
+      if (!path || path === "(none)") return;
       const content = window.AKDWDiff.getModified();
-      await fetch('/api/fs/write', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+      await fetch("/api/fs/write", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path: path, content: content }),
       });
-      setStatus('Saved proposed diff to file');
+      setStatus("Saved proposed diff to file");
     });
 
-    initMonaco();
-    window.AKDWDiff.init('diffEditor');
-    wireDnD();
-
-    const savedPath = localStorage.getItem('akdw_editor_path') || opts.defaultPath;
+    const savedPath = localStorage.getItem("akdw_editor_path") || opts.defaultPath;
     loadTree(savedPath);
-
-    document.getElementById('active-session').textContent = sessionId;
+    await ensureEditorSession();
+    sessionPrimed = false;
+    await primeEditorContext();
   }
 
   return { init: init };

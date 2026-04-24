@@ -52,6 +52,8 @@ class Config:
     )
     WORKSPACE_PATH = os.getenv("WORKSPACE_PATH", "/app/workspace")
     KERNEL_SRC_PATH = os.getenv("KERNEL_SRC_PATH", "/app/kernel")
+    EXTRA_WORKSPACE_PATHS = os.getenv("EXTRA_WORKSPACE_PATHS", "")
+    ALLOWED_EXTRA_PATHS = os.getenv("ALLOWED_EXTRA_PATHS", "/local/mnt/workspace")
     PATCHES_PATH = os.getenv("PATCHES_PATH", "/app/patches")
     LOGS_PATH = os.getenv("LOGS_PATH", "/app/workspace/logs")
     SESSIONS_DB_PATH = os.getenv("SESSIONS_DB_PATH", "/app/sessions/akdw_sessions.db")

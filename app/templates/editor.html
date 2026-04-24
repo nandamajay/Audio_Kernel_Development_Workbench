@@ -56,7 +56,7 @@
             {% endfor %}
           </select>
         </div>
-        <span class="small-muted">Session: live</span>
+        <span class="small-muted">Session: <span id="editorSessionLabel">initializing...</span></span>
       </div>
 
       <div id="stepCards" class="step-cards"></div>
@@ -68,6 +68,21 @@
       </div>
     </aside>
   </div>
+
+  <section class="panel" id="editorShellPanel">
+    <div class="chat-header-row">
+      <h3 style="margin:0;">🖥 Terminal</h3>
+      <button id="shellPanelToggle" class="btn-secondary" type="button">▼</button>
+    </div>
+    <div id="shellPanelBody" style="display:grid;gap:8px;margin-top:8px;">
+      <div class="chat-input-row">
+        <input id="shellCmdInput" class="input" placeholder="git log --oneline -3">
+        <button id="shellRunBtn" class="btn-primary" type="button">Run</button>
+      </div>
+      <div class="small-muted" id="shellStatus">Idle</div>
+      <pre id="shellOutput" class="terminal-pane" style="min-height:160px;max-height:260px;overflow:auto;padding:10px;"></pre>
+    </div>
+  </section>
 </div>
 {% include "components/folder_browser_modal.html" %}
 {% endblock %}

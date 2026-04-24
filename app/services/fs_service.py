@@ -12,6 +12,7 @@ DEFAULT_KERNEL = "/app/kernel"
 DEFAULT_PATCHES = "/app/patches"
 DEFAULT_LOGS = "/app/workspace/logs"
 DEFAULT_SESSIONS_DB = "/app/sessions/akdw_sessions.db"
+DEFAULT_WORKSPACE_MOUNTS = "/app/workspace_mounts"
 
 
 def workspace_path() -> str:
@@ -22,8 +23,33 @@ def kernel_src_path() -> str:
     return os.getenv("KERNEL_SRC_PATH", DEFAULT_KERNEL)
 
 
+def extra_workspace_paths() -> List[str]:
+    raw = os.getenv("EXTRA_WORKSPACE_PATHS", "")
+    if not raw.strip():
+        return []
+    return [os.path.abspath(item.strip()) for item in raw.split(",") if item.strip()]
+
+
+def workspace_mounts_path() -> str:
+    return os.getenv("WORKSPACE_MOUNTS_PATH", DEFAULT_WORKSPACE_MOUNTS)
+
+
 def _allowed_roots() -> List[str]:
-    return [os.path.abspath(workspace_path()), os.path.abspath(kernel_src_path())]
+    roots = [
+        os.path.abspath(workspace_path()),
+        os.path.abspath(kernel_src_path()),
+        os.path.abspath(workspace_mounts_path()),
+    ]
+    roots.extend(extra_workspace_paths())
+    # Preserve order while removing duplicates.
+    dedup: List[str] = []
+    seen = set()
+    for root in roots:
+        if root in seen:
+            continue
+        seen.add(root)
+        dedup.append(root)
+    return dedup
 
 
 def normalize_path(path: str) -> str:
@@ -70,6 +96,27 @@ def list_directory(path: str) -> List[Dict[str, str]]:
     return entries
 
 
+def list_browse_roots() -> List[Dict[str, str]]:
+    roots = [os.path.abspath(kernel_src_path())]
+    roots.extend(extra_workspace_paths())
+    mounts_root = os.path.abspath(workspace_mounts_path())
+    if os.path.isdir(mounts_root):
+        for name in sorted(os.listdir(mounts_root)):
+            full = os.path.join(mounts_root, name)
+            if os.path.isdir(full):
+                roots.append(full)
+
+    dedup = []
+    seen = set()
+    for item in roots:
+        if item in seen or not os.path.isdir(item):
+            continue
+        seen.add(item)
+        dedup.append(item)
+
+    return [{"label": os.path.basename(path.rstrip("/")) or path, "path": path} for path in dedup]
+
+
 def ensure_workspace_structure() -> None:
     workspace = workspace_path()
     kernel = kernel_src_path()
@@ -84,6 +131,7 @@ def ensure_workspace_structure() -> None:
         os.path.dirname(sessions_db),
         logs,
         os.path.join(workspace, "workspace"),
+        workspace_mounts_path(),
     ]
     for root in roots:
         Path(root).mkdir(parents=True, exist_ok=True)

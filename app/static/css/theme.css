@@ -448,6 +448,8 @@ body {
 .chat-row { border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin-bottom: 8px; white-space: pre-wrap; }
 .chat-row.user { background: rgba(31, 111, 235, 0.15); }
 .chat-row.assistant { background: rgba(22, 27, 34, 0.8); }
+.chat-row.assistant { position: relative; padding-right: 34px; }
+.msg-content { word-break: break-word; }
 .chat-link {
   color: var(--accent-blue);
   text-decoration: underline;
@@ -458,6 +460,21 @@ body {
   color: #60a5fa;
   text-decoration-color: #60a5fa;
 }
+.copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 2px 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.chat-row.assistant:hover .copy-btn { opacity: 1; }
 .attach-pills { display: flex; flex-wrap: wrap; gap: 6px; }
 .file-pill {
   display: inline-flex;

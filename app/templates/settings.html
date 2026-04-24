@@ -80,6 +80,33 @@
     border: 1px solid rgba(239, 68, 68, 0.45);
     color: #fecaca;
   }
+
+  .extra-path-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+  }
+
+  .extra-path-list {
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    padding: 10px;
+    display: grid;
+    gap: 6px;
+    min-height: 44px;
+  }
+
+  .extra-path-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 12px;
+    padding: 6px 8px;
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.02);
+  }
 </style>
 {% endblock %}
 
@@ -117,6 +144,13 @@
     <label>Kernel Source Path</label>
     <input id="kernelSrcPath" class="input" value="{{ values.get('KERNEL_SRC_PATH', '/app/kernel') }}">
 
+    <label>Extra Workspace Paths</label>
+    <div class="extra-path-row">
+      <input id="extraPathInput" class="input" placeholder="/local/mnt/workspace/my_driver">
+      <button id="addExtraPathBtn" class="btn-secondary" type="button">+ Add</button>
+    </div>
+    <div id="extraPathList" class="extra-path-list"></div>
+
     <div class="setup-actions">
       <a class="btn-secondary" href="{{ url_for('dashboard.setup_page') }}">Open Setup Wizard</a>
       <button id="saveBtn" class="settings-save" type="button">Save Settings</button>
@@ -130,11 +164,58 @@
 <script>
 (function () {
   const statusEl = document.getElementById('setupStatus');
+  const extraListEl = document.getElementById('extraPathList');
+  const extraPaths = {{ extra_paths | tojson }};
 
   function setStatus(ok, message) {
     statusEl.className = 'settings-status ' + (ok ? 'ok' : 'err');
     statusEl.textContent = (ok ? '✅ ' : '❌ ') + (message || '');
   }
+
+  function renderExtraPaths() {
+    extraListEl.innerHTML = '';
+    if (!extraPaths.length) {
+      extraListEl.innerHTML = '<div class="small-muted">No extra workspace paths configured.</div>';
+      return;
+    }
+    extraPaths.forEach(function (path, idx) {
+      const row = document.createElement('div');
+      row.className = 'extra-path-item';
+      row.innerHTML = '<span>✓ ' + path + '</span>';
+      const rm = document.createElement('button');
+      rm.type = 'button';
+      rm.className = 'btn-secondary';
+      rm.textContent = 'Remove';
+      rm.addEventListener('click', function () {
+        extraPaths.splice(idx, 1);
+        renderExtraPaths();
+      });
+      row.appendChild(rm);
+      extraListEl.appendChild(row);
+    });
+  }
+
+  document.getElementById('addExtraPathBtn').addEventListener('click', async function () {
+    const input = document.getElementById('extraPathInput');
+    const hostPath = input.value.trim();
+    if (!hostPath) return;
+    const resp = await fetch('/api/editor/mount_path', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host_path: hostPath }),
+    });
+    const data = await resp.json();
+    if (!data.ok) {
+      setStatus(false, data.error || 'Failed to mount path');
+      return;
+    }
+    if (!extraPaths.includes(data.mount_alias)) {
+      extraPaths.push(data.mount_alias);
+    }
+    input.value = '';
+    renderExtraPaths();
+    setStatus(true, 'Mounted: ' + data.mount_alias);
+  });
 
   document.getElementById('saveBtn').addEventListener('click', async function () {
     const payload = {
@@ -145,6 +226,7 @@
       ca_bundle: document.getElementById('caBundle').value,
       default_model: document.getElementById('defaultModel').value,
       kernel_src_path: document.getElementById('kernelSrcPath').value,
+      extra_workspace_paths: extraPaths,
     };
     const resp = await fetch('/api/settings/save', {
       method: 'POST',
@@ -154,6 +236,8 @@
     const data = await resp.json();
     setStatus(!!data.ok, data.message || 'Settings updated');
   });
+
+  renderExtraPaths();
 })();
 </script>
 {% endblock %}
