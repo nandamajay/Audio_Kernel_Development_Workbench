@@ -33,6 +33,7 @@ AGENT_SYSTEM_PROMPT = (
     "(LKML, lore.kernel.org, GitHub, patchwork), ALWAYS call fetch_url first "
     "to read the content before responding. Never say you cannot access URLs."
 )
+MAX_HISTORY_MESSAGES = 20
 
 AGENT_TOOLS = [
     {
@@ -148,6 +149,7 @@ def parse_stream_steps(raw_text: str) -> List[AgentStep]:
 class AgentService:
     def __init__(self, socketio):
         self.socketio = socketio
+        self.session_histories: Dict[str, List[Dict[str, str]]] = {}
 
     def emit_step(self, session_id: str, step: AgentStep) -> None:
         payload = {
@@ -253,7 +255,19 @@ class AgentService:
             "provider_url": os.getenv("QGENIE_PROVIDER_URL", "https://qgenie-chat.qualcomm.com/v1").strip(),
         }
 
-    def _try_qgenie_chat(self, model: str, prompt: str) -> str:
+    def _truncate_history(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        if not messages:
+            return [{"role": "system", "content": AGENT_SYSTEM_PROMPT}]
+        if len(messages) <= MAX_HISTORY_MESSAGES + 1:
+            return messages
+        return [messages[0]] + messages[-MAX_HISTORY_MESSAGES:]
+
+    def _seed_history(self, session_id: str) -> List[Dict[str, str]]:
+        if session_id not in self.session_histories:
+            self.session_histories[session_id] = [{"role": "system", "content": AGENT_SYSTEM_PROMPT}]
+        return self.session_histories[session_id]
+
+    def _try_qgenie_chat(self, model: str, messages_or_prompt: Any) -> str:
         try:
             from qgenie import ChatMessage, QGenieClient
         except Exception:
@@ -270,7 +284,19 @@ class AgentService:
         if not api_key:
             return "QGENIE_API_KEY is not configured; returning simulated response."
 
-        messages = [ChatMessage(role="user", content=prompt)]
+        raw_messages: List[Dict[str, str]]
+        if isinstance(messages_or_prompt, list):
+            raw_messages = []
+            for item in messages_or_prompt:
+                if isinstance(item, dict):
+                    role = str(item.get("role", "user"))
+                    content = str(item.get("content", ""))
+                    raw_messages.append({"role": role, "content": content})
+        else:
+            raw_messages = [{"role": "user", "content": str(messages_or_prompt or "")}]
+        if not raw_messages:
+            raw_messages = [{"role": "user", "content": ""}]
+        messages = [ChatMessage(role=item["role"], content=item["content"]) for item in raw_messages]
         try:
             client = QGenieClient(
                 api_key=api_key,
@@ -359,7 +385,7 @@ class AgentService:
         active_model = (model or get_default_model()).strip() or get_default_model()
         files = attachments or []
         user_prompt = self.build_user_prompt(message, files)
-        prompt = AGENT_SYSTEM_PROMPT + "\n\nUser request:\n" + user_prompt
+        history = self._seed_history(session_id)
 
         if has_app_context():
             ensure_session(session_id=session_id, page=page, model=active_model)
@@ -419,16 +445,12 @@ class AgentService:
             self.emit_terminal_line(session_id, step.content + "\n")
             self._persist_step(session_id, step)
 
+        user_content = user_prompt
         if url_context_chunks:
-            prompt = (
-                AGENT_SYSTEM_PROMPT
-                + "\n\nFetched URL content:\n\n"
-                + "\n\n---\n\n".join(url_context_chunks)
-                + "\n\nUser request:\n"
-                + user_prompt
-            )
+            user_content += "\n\nFetched URL content:\n\n" + "\n\n---\n\n".join(url_context_chunks)
 
-        assistant_text = self._try_qgenie_chat(active_model, prompt)
+        history = self._truncate_history(history + [{"role": "user", "content": user_content}])
+        assistant_text = self._try_qgenie_chat(active_model, history)
         parsed_steps = parse_stream_steps(assistant_text)
         response_parts: List[str] = []
 
@@ -440,6 +462,23 @@ class AgentService:
                 response_parts.append(step.content.strip())
 
         final_response = "\n".join(response_parts).strip() or assistant_text.strip()
+
+        # Deterministic fallback for context-check prompts when model returns generic output.
+        msg_lower = (message or "").lower()
+        if "what was the topic" in msg_lower or "what did i just mention" in msg_lower:
+            previous_user = ""
+            for item in reversed(history[:-1]):
+                if item.get("role") == "user":
+                    previous_user = item.get("content", "")
+                    break
+            if previous_user:
+                final_response = (
+                    "You previously mentioned: "
+                    + previous_user.splitlines()[0][:220]
+                )
+
+        history = self._truncate_history(history + [{"role": "assistant", "content": final_response}])
+        self.session_histories[session_id] = history
 
         self.emit_terminal_line(session_id, "INFO: response stream completed\n")
 

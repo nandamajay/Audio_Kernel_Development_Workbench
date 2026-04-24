@@ -200,6 +200,28 @@
     position: relative;
   }
 
+  .chat-link {
+    color: var(--accent-blue);
+    text-decoration: underline;
+    text-decoration-color: rgba(59, 130, 246, 0.4);
+    text-underline-offset: 2px;
+    transition: color 0.15s;
+  }
+
+  .chat-link:hover {
+    color: #60a5fa;
+    text-decoration-color: #60a5fa;
+  }
+
+  .ext-icon {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-left: 3px;
+    opacity: 0.6;
+    font-size: 10px;
+  }
+
   .copy-code-btn {
     float: right;
     border: 1px solid var(--border);
@@ -326,7 +348,6 @@
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script>
 (function () {
-  const sessionKey = 'akdw_agent_session';
   const modelKey = 'akdw_agent_model';
 
   let sessionId = null;
@@ -341,6 +362,9 @@
   }
 
   function createSessionId() {
+    if (window.crypto && window.crypto.randomUUID) {
+      return window.crypto.randomUUID();
+    }
     return 'sess-agent-' + Math.random().toString(36).slice(2, 10);
   }
 
@@ -349,13 +373,32 @@
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   }
 
+  function linkifyText(text) {
+    return (text || '').replace(
+      /(https?:\/\/[^\s<>"]+)/g,
+      '<a href="$1" target="_blank" rel="noopener noreferrer" class="chat-link">$1 <span class="ext-icon">↗</span></a>'
+    );
+  }
+
+  function renderAssistantHtml(text) {
+    const linked = linkifyText(text || '');
+    if (!window.marked) return linked;
+    const renderer = new window.marked.Renderer();
+    renderer.link = function (href, title, txt) {
+      const tip = title || href;
+      return '<a href="' + href + '" target="_blank" rel="noopener noreferrer" class="chat-link" title="' + tip + '">' +
+        (txt || href) + ' <span class="ext-icon">↗</span></a>';
+    };
+    window.marked.setOptions({ renderer: renderer, breaks: true });
+    return window.marked.parse(linked);
+  }
+
   function createNewSession() {
     sessionId = createSessionId();
     selectedHistorySessionId = null;
     replayMode = false;
     waiting = false;
     attached = [];
-    localStorage.setItem(sessionKey, sessionId);
     document.getElementById('agentSessionLabel').textContent = sessionId;
     document.getElementById('messages-area').innerHTML = '';
     document.getElementById('historyModePill').style.display = 'none';
@@ -385,13 +428,14 @@
 
   function appendBubble(role, text, asMarkdown) {
     const row = document.createElement('div');
+    row.id = 'msg-' + Date.now() + '-' + Math.random().toString(16).slice(2, 8);
     row.className = 'msg-row ' + (role === 'user' ? 'user' : 'assistant');
 
     const bubble = document.createElement('div');
     bubble.className = 'bubble ' + (role === 'user' ? 'user' : 'assistant');
 
     if (role === 'assistant' && asMarkdown && window.marked) {
-      bubble.innerHTML = window.marked.parse(text || '');
+      bubble.innerHTML = renderAssistantHtml(text || '');
       decorateCodeBlocks(bubble);
     } else {
       bubble.textContent = text || '';
@@ -405,6 +449,7 @@
     row.appendChild(bubble);
     document.getElementById('messages-area').appendChild(row);
     scrollToBottom();
+    return row.id;
   }
 
   function decorateCodeBlocks(container) {
@@ -424,19 +469,30 @@
     });
   }
 
-  function showThinkingBubble() {
-    removeThinkingBubble();
+  function appendThinkingBubble() {
+    const thinkingId = 'thinking-' + Date.now();
     const row = document.createElement('div');
     row.className = 'msg-row thinking';
-    row.id = 'thinkingRow';
+    row.id = thinkingId;
     row.innerHTML = '<div class="thinking-bubble"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>';
     document.getElementById('messages-area').appendChild(row);
     scrollToBottom();
+    return thinkingId;
   }
 
-  function removeThinkingBubble() {
-    const row = document.getElementById('thinkingRow');
-    if (row) row.remove();
+  function replaceThinkingBubble(thinkingId, responseText) {
+    const row = document.getElementById(thinkingId);
+    if (!row) {
+      appendBubble('assistant', responseText, true);
+      return;
+    }
+    const replacement = document.createElement('div');
+    replacement.className = 'msg-row assistant';
+    replacement.innerHTML = '<div class="bubble assistant">' + renderAssistantHtml(responseText || '') +
+      '<span class="bubble-time">' + nowStamp() + '</span></div>';
+    row.replaceWith(replacement);
+    decorateCodeBlocks(replacement);
+    scrollToBottom();
   }
 
   function renderAttachPills() {
@@ -479,7 +535,7 @@
     input.value = '';
     autoResizeInput();
 
-    showThinkingBubble();
+    const thinkingId = appendThinkingBubble();
     setSendWaiting(true);
 
     try {
@@ -495,14 +551,12 @@
         }),
       });
       const data = await res.json();
-      removeThinkingBubble();
-      appendBubble('assistant', data.response || data.content || data.message || 'No response', true);
+      replaceThinkingBubble(thinkingId, data.response || data.content || data.message || 'No response');
       attached = [];
       renderAttachPills();
       loadHistorySidebar();
     } catch (err) {
-      removeThinkingBubble();
-      appendBubble('assistant', 'Request failed: ' + err, false);
+      replaceThinkingBubble(thinkingId, 'Request failed: ' + err);
     } finally {
       setSendWaiting(false);
       input.focus();
@@ -574,7 +628,6 @@
       method: 'POST',
     });
     sessionId = selectedHistorySessionId;
-    localStorage.setItem(sessionKey, sessionId);
     setReplayMode(false);
     document.getElementById('agentInput').focus();
   }

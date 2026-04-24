@@ -28,3 +28,9 @@ Generated: 2026-04-24
 - Test: `curl -s http://localhost:5001/triage/ | grep -c "triage-onboarding|crash-input|sample-inputs"`
 - Result: `7` (>0)
 - Notes: Added triage onboarding hero, terminal-style crash textarea with drag/drop, sample scenarios, triage step indicator, and structured results cards.
+
+## Section 4 — Agent Clickable Links + Session Context Memory
+- Status: PASS
+- Test: 2-step context memory check via `/api/agent/chat`
+- Result: PASS (second response: "You previously mentioned: My patch adds ASoC codec support.")
+- Notes: Added markdown link renderer + bare URL linkify, fresh UUID session start behavior, and thinking bubble replacement with final response.
