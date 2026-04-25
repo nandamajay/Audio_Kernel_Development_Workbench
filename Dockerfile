@@ -25,9 +25,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY requirements.txt /tmp/requirements.txt
+ARG REQUIREMENTS_FILE=requirements.txt
+ARG PIP_EXTRA_INDEX_URL=https://devpi.qualcomm.com/qcom/dev/+simple
+ARG PIP_TRUSTED_HOST=devpi.qualcomm.com
+COPY requirements*.txt /tmp/
 RUN python -m pip install --upgrade pip && \
-    pip install --no-cache-dir --extra-index-url https://devpi.qualcomm.com/qcom/dev/+simple --trusted-host devpi.qualcomm.com -r /tmp/requirements.txt
+    req_file="/tmp/${REQUIREMENTS_FILE}" && \
+    if [ ! -f "$req_file" ]; then req_file="/tmp/requirements.txt"; fi && \
+    if [ -n "$PIP_EXTRA_INDEX_URL" ]; then \
+      pip install --no-cache-dir --extra-index-url "$PIP_EXTRA_INDEX_URL" --trusted-host "$PIP_TRUSTED_HOST" -r "$req_file"; \
+    else \
+      pip install --no-cache-dir -r "$req_file"; \
+    fi
 
 RUN mkdir -p /usr/local/share/linux && \
     curl -fsSL https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/scripts/checkpatch.pl -o /usr/local/bin/checkpatch.pl && \

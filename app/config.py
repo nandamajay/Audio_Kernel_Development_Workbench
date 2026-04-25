@@ -95,8 +95,8 @@ def get_user_display_name() -> str:
 
 
 def is_first_run() -> bool:
-    if not ENV_PATH.exists():
-        return True
+    # Containerized and CI deployments may inject env vars via env_file or runtime
+    # without mounting an on-disk /app/.env file.
     return os.getenv("QGENIE_API_KEY", "").strip() == ""
 
 

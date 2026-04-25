@@ -67,12 +67,17 @@ jobs:
           set_kv "HOST_SESSIONS_PATH" "${GITHUB_WORKSPACE}/sessions"
           set_kv "HOST_PATCHES_PATH" "${GITHUB_WORKSPACE}/patches"
           set_kv "HOST_MNT_WORKSPACE_PATH" "/tmp"
+          set_kv "QGENIE_API_KEY" "ci-regression-key"
           echo "CI .env prepared:"
-          grep -E "^(HOST_WORKSPACE_PATH|HOST_KERNEL_PATH|HOST_SESSIONS_PATH|HOST_PATCHES_PATH|HOST_MNT_WORKSPACE_PATH)=" .env
+          grep -E "^(HOST_WORKSPACE_PATH|HOST_KERNEL_PATH|HOST_SESSIONS_PATH|HOST_PATCHES_PATH|HOST_MNT_WORKSPACE_PATH|QGENIE_API_KEY)=" .env
 
       - name: Build and start AKDW
         run: |
-          ${COMPOSE_CMD} up -d --build akdw
+          ${COMPOSE_CMD} build \
+            --build-arg REQUIREMENTS_FILE=requirements-ci.txt \
+            --build-arg PIP_EXTRA_INDEX_URL= \
+            akdw
+          ${COMPOSE_CMD} up -d akdw
 
       - name: Wait for health
         run: |
