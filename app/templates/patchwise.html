@@ -209,6 +209,119 @@
     transition: width 0.25s ease;
   }
 
+  .pipeline-summary {
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    margin-bottom: 10px;
+    display: none;
+  }
+
+  .pipeline-steps {
+    display: grid;
+    gap: 8px;
+  }
+
+  .pipeline-step {
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .pipeline-step.pass {
+    border-color: rgba(16, 185, 129, 0.45);
+    background: rgba(16, 185, 129, 0.10);
+  }
+
+  .pipeline-step.fail {
+    border-color: rgba(239, 68, 68, 0.5);
+    background: rgba(239, 68, 68, 0.10);
+  }
+
+  .pipeline-step.skip {
+    border-color: rgba(148, 163, 184, 0.35);
+    background: rgba(148, 163, 184, 0.08);
+  }
+
+  .pipeline-topline {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    margin-bottom: 4px;
+  }
+
+  .pipeline-output {
+    margin: 6px 0 0;
+    max-height: 120px;
+    overflow: auto;
+    white-space: pre-wrap;
+    font-size: 11px;
+    color: #c7d8ef;
+    font-family: "IBM Plex Mono", monospace;
+  }
+
+  .autofix-panel {
+    margin-top: 12px;
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    display: grid;
+    gap: 8px;
+  }
+
+  .autofix-fixes {
+    display: grid;
+    gap: 4px;
+    font-size: 12px;
+    color: #c6d6ec;
+  }
+
+  .autofix-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .autofix-diff {
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    background: rgba(13, 17, 23, 0.75);
+    padding: 8px;
+    max-height: 180px;
+    overflow: auto;
+    white-space: pre;
+    font-size: 11px;
+    font-family: "IBM Plex Mono", monospace;
+    color: #d0def1;
+    margin: 0;
+  }
+
+  .trace-panel {
+    margin-top: 12px;
+    border-top: 1px solid var(--glass-border);
+    padding-top: 10px;
+  }
+
+  .trace-list {
+    display: grid;
+    gap: 6px;
+    max-height: 180px;
+    overflow: auto;
+  }
+
+  .trace-item {
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    padding: 6px 8px;
+    background: rgba(255,255,255,0.02);
+    font-size: 11px;
+  }
+
   .results-enter {
     opacity: 0;
     transform: translateY(10px);
@@ -450,16 +563,29 @@
       <input id="contextUrl" class="input" placeholder="🔗 Paste LKML thread URL for additional context (optional)">
       <div class="patch-actions">
         <button id="runReviewBtn" class="btn-primary btn-run-review btn-disabled" type="button" title="Load a patch file first">▶ Run AI Review</button>
+        <button id="runPipelineBtn" class="btn-secondary btn-disabled" type="button" title="Load a patch file first">🧪 Run Full Pipeline</button>
         <button id="runCheckpatchBtn" class="btn-secondary btn-disabled" type="button" title="Load a patch file first">⚙ Run Checkpatch</button>
+        <button id="previewAutofixBtn" class="btn-secondary btn-disabled" type="button" title="Load a patch file first">🩹 Autofix Preview</button>
         <button id="exportBtn" class="btn-secondary btn-disabled" type="button" title="Load a patch file first">⬇ Export Report</button>
       </div>
       <div id="contextHint" class="context-hint">
         ✅ File loaded! Now choose your action:
         <button id="hintRunReviewBtn" class="btn-primary" type="button">▶ Run AI Review</button>
+        <button id="hintRunPipelineBtn" class="btn-secondary" type="button">🧪 Run Full Pipeline</button>
         <button id="hintCheckpatchBtn" class="btn-secondary" type="button">⚙ Run Checkpatch</button>
       </div>
       <textarea id="patchContent" class="input" style="font-family:'IBM Plex Mono',monospace;min-height:480px;"></textarea>
       <div id="checkpatchOutput" class="small-muted"></div>
+      <div id="autofixPanel" class="autofix-panel">
+        <div><strong>Safe Autofix Preview</strong></div>
+        <div id="autofixSummary" class="small-muted">Run preview to inspect deterministic fixes before applying.</div>
+        <div id="autofixFixes" class="autofix-fixes"></div>
+        <div class="autofix-actions">
+          <button id="applyAutofixBtn" class="btn-primary btn-disabled" type="button" disabled>Apply Selected Fixes</button>
+          <button id="rollbackAutofixBtn" class="btn-secondary btn-disabled" type="button" disabled>Rollback Last Apply</button>
+        </div>
+        <pre id="autofixDiff" class="autofix-diff">No preview yet.</pre>
+      </div>
     </section>
     <div id="patchwiseHandleRight" class="resize-handle" title="Resize panels"></div>
 
@@ -472,6 +598,8 @@
         <div class="track"><div id="reviewProgressFill" class="fill"></div></div>
         <div id="reviewProgressPct" class="small-muted">0%</div>
       </div>
+      <div id="pipelineSummary" class="pipeline-summary"></div>
+      <div id="pipelineSteps" class="pipeline-steps"></div>
       <div id="reviewPlaceholder" class="result-placeholder">
         <strong>🔍 Review Results</strong>
         <span>Results will appear here after you click "Run AI Review".</span>
@@ -484,6 +612,11 @@
         <div id="pwAskMessages" class="assistant-messages"></div>
         <textarea id="pwAskInput" class="input" rows="3" placeholder="Ask about the loaded patch..."></textarea>
         <button id="pwAskBtn" class="btn-secondary" type="button">Ask Reviewer</button>
+      </div>
+      <div class="trace-panel">
+        <h4>Execution Trace</h4>
+        <div id="traceSummary" class="small-muted">Trace logs will appear after review/pipeline/autofix operations.</div>
+        <div id="traceList" class="trace-list"></div>
       </div>
     </aside>
   </div>

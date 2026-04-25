@@ -99,6 +99,24 @@ class ReviewEvidence(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 
+class PatchReviewTrace(db.Model):
+    __tablename__ = "patch_review_traces"
+
+    id = db.Column(db.Integer, primary_key=True)
+    trace_id = db.Column(db.String(64), nullable=False, index=True)
+    session_id = db.Column(db.String(64), nullable=False, index=True)
+    stage = db.Column(db.String(64), nullable=False, index=True)
+    tool = db.Column(db.String(64), nullable=True)
+    status = db.Column(db.String(24), nullable=False, default="ok")
+    duration_ms = db.Column(db.Integer, nullable=False, default=0)
+    exit_code = db.Column(db.Integer, nullable=True)
+    token_input = db.Column(db.Integer, nullable=False, default=0)
+    token_output = db.Column(db.Integer, nullable=False, default=0)
+    error_message = db.Column(db.Text, nullable=True)
+    details_json = db.Column(db.Text, nullable=True, default="{}")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
 class UpstreamPatch(db.Model):
     __tablename__ = "upstream_patches"
 

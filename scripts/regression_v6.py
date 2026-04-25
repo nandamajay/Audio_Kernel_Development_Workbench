@@ -139,6 +139,28 @@ def run_observability_extras(base_url: str) -> List[CheckResult]:
     ok = s == 200 and isinstance(parsed, dict) and parsed.get("ok") is True and isinstance(parsed.get("rows"), list)
     extras.append(CheckResult(name="EXTRA_TERMINAL_AUDIT", ok=ok, note=f"GET /api/terminal/audit?limit=1 => {s}"))
 
+    s, body, parsed = request_json(
+        base_url,
+        "/api/patchwise/pipeline",
+        method="POST",
+        data={"session_id": "extra-pipeline", "patch_content": "diff --git a/a.c b/a.c\n"},
+    )
+    ok = s == 200 and isinstance(parsed, dict) and parsed.get("ok") is True and isinstance(parsed.get("steps"), list)
+    extras.append(CheckResult(name="EXTRA_PATCHWISE_PIPELINE", ok=ok, note=f"POST /api/patchwise/pipeline => {s}"))
+
+    s, body, parsed = request_json(
+        base_url,
+        "/api/patchwise/autofix/preview",
+        method="POST",
+        data={"session_id": "extra-autofix", "patch_content": "int main(){return 0;}\t"},
+    )
+    ok = s == 200 and isinstance(parsed, dict) and parsed.get("ok") is True and "diff" in parsed
+    extras.append(CheckResult(name="EXTRA_PATCHWISE_AUTOFIX", ok=ok, note=f"POST /api/patchwise/autofix/preview => {s}"))
+
+    s, body, parsed = request_json(base_url, "/api/patchwise/traces?limit=1", method="GET")
+    ok = s == 200 and isinstance(parsed, dict) and parsed.get("ok") is True and isinstance(parsed.get("rows"), list)
+    extras.append(CheckResult(name="EXTRA_PATCHWISE_TRACES", ok=ok, note=f"GET /api/patchwise/traces?limit=1 => {s}"))
+
     return extras
 
 

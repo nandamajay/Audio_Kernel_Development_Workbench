@@ -6,9 +6,12 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
+import time
 import uuid
+from difflib import unified_diff
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
@@ -20,14 +23,16 @@ from sqlalchemy import inspect, text
 from werkzeug.utils import secure_filename
 
 from app.config import MODEL_METADATA, get_available_models, get_default_model
-from app.models import ReviewEvidence, ReviewSession, db
+from app.models import PatchReviewTrace, ReviewEvidence, ReviewSession, db
 from app.services.activity_service import log_activity
 from app.services.env_service import resolve_ssl_verify
 
 
 patchwise_bp = Blueprint("patchwise", __name__)
 _schema_checked = False
+_trace_schema_checked = False
 _uploaded_files: Dict[str, str] = {}
+_autofix_backups: Dict[str, str] = {}
 
 
 def _ensure_upload_dir() -> str:
@@ -235,6 +240,330 @@ def _ensure_review_session_schema() -> None:
     _schema_checked = True
 
 
+def _ensure_patch_trace_schema() -> None:
+    global _trace_schema_checked
+    if _trace_schema_checked:
+        return
+    inspector = inspect(db.engine)
+    if not inspector.has_table("patch_review_traces"):
+        db.session.execute(
+            text(
+                """
+                CREATE TABLE patch_review_traces (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trace_id VARCHAR(64) NOT NULL,
+                    session_id VARCHAR(64) NOT NULL,
+                    stage VARCHAR(64) NOT NULL,
+                    tool VARCHAR(64),
+                    status VARCHAR(24) NOT NULL DEFAULT 'ok',
+                    duration_ms INTEGER NOT NULL DEFAULT 0,
+                    exit_code INTEGER,
+                    token_input INTEGER NOT NULL DEFAULT 0,
+                    token_output INTEGER NOT NULL DEFAULT 0,
+                    error_message TEXT,
+                    details_json TEXT DEFAULT '{}',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+        db.session.commit()
+    _trace_schema_checked = True
+
+
+def _new_trace_id(prefix: str = "pwtrace") -> str:
+    return f"{prefix}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
+
+
+def _estimate_tokens(value: str) -> int:
+    return max(0, int(len(value or "") / 4))
+
+
+def _log_patch_trace(
+    *,
+    trace_id: str,
+    session_id: str,
+    stage: str,
+    tool: str = "",
+    status: str = "ok",
+    duration_ms: int = 0,
+    exit_code: int | None = None,
+    token_input: int = 0,
+    token_output: int = 0,
+    error_message: str = "",
+    details: Dict[str, Any] | None = None,
+) -> None:
+    try:
+        _ensure_patch_trace_schema()
+        row = PatchReviewTrace(
+            trace_id=trace_id,
+            session_id=session_id,
+            stage=stage,
+            tool=tool or None,
+            status=status,
+            duration_ms=max(0, int(duration_ms or 0)),
+            exit_code=exit_code,
+            token_input=max(0, int(token_input or 0)),
+            token_output=max(0, int(token_output or 0)),
+            error_message=(error_message or None),
+            details_json=json.dumps(details or {}),
+        )
+        db.session.add(row)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
+def _resolve_patch_payload(payload: Dict[str, Any]) -> tuple[str, str, str | None, int]:
+    patch_content = payload.get("patch_content", "")
+    filepath = (payload.get("filepath") or "").strip()
+    upload_token = (payload.get("upload_token") or "").strip()
+
+    if not patch_content.strip() and upload_token and upload_token in _uploaded_files:
+        filepath = _uploaded_files[upload_token]
+
+    if not patch_content.strip() and filepath:
+        if not _is_allowed_patch_path(filepath):
+            return "", filepath, "Path not allowed", 403
+        if not os.path.isfile(filepath):
+            return "", filepath, "Patch file not found", 404
+        try:
+            with open(filepath, "r", encoding="utf-8", errors="replace") as handle:
+                patch_content = handle.read()
+        except Exception as exc:
+            return "", filepath, f"Unable to read patch file: {exc}", 400
+
+    if not patch_content.strip():
+        return "", filepath, "patch_content or filepath is required", 400
+
+    return patch_content, filepath, None, 200
+
+
+def _run_shell_step(
+    *,
+    step_id: str,
+    name: str,
+    command: List[str] | None = None,
+    timeout: int = 25,
+    cwd: str | None = None,
+    skip_reason: str = "",
+) -> Dict[str, Any]:
+    started = time.perf_counter()
+    if skip_reason:
+        return {
+            "id": step_id,
+            "name": name,
+            "status": "SKIP",
+            "exit_code": None,
+            "duration_ms": 0,
+            "output_preview": skip_reason,
+            "command": command or [],
+        }
+
+    output = ""
+    exit_code: int | None = None
+    status = "PASS"
+    error_message = ""
+    try:
+        proc = subprocess.run(
+            command or [],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=cwd,
+        )
+        exit_code = int(proc.returncode)
+        output = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+        status = "PASS" if proc.returncode == 0 else "FAIL"
+    except subprocess.TimeoutExpired as exc:
+        partial_out = exc.stdout or ""
+        partial_err = exc.stderr or ""
+        output = f"{partial_out}\n{partial_err}\n[timeout after {timeout}s]".strip()
+        exit_code = 124
+        status = "FAIL"
+        error_message = "timeout"
+    except Exception as exc:
+        output = str(exc)
+        exit_code = 1
+        status = "FAIL"
+        error_message = str(exc)
+
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    return {
+        "id": step_id,
+        "name": name,
+        "status": status,
+        "exit_code": exit_code,
+        "duration_ms": duration_ms,
+        "output_preview": (output or "")[:8000],
+        "error_message": error_message,
+        "command": command or [],
+    }
+
+
+def _collect_pipeline_findings(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    findings: List[Dict[str, Any]] = []
+    for step in steps:
+        output = step.get("output_preview", "")
+        if step.get("id") == "checkpatch":
+            for line in output.splitlines():
+                text_line = line.strip()
+                if not text_line:
+                    continue
+                if "ERROR:" in text_line:
+                    findings.append({"severity": "ERROR", "tool": "checkpatch", "message": text_line})
+                elif "WARNING:" in text_line:
+                    findings.append({"severity": "WARNING", "tool": "checkpatch", "message": text_line})
+                elif "CHECK:" in text_line:
+                    findings.append({"severity": "CHECK", "tool": "checkpatch", "message": text_line})
+        elif step.get("status") == "FAIL":
+            findings.append(
+                {
+                    "severity": "ERROR",
+                    "tool": step.get("id"),
+                    "message": step.get("error_message") or "Step failed. Inspect output for details.",
+                }
+            )
+    return findings[:80]
+
+
+def _build_pipeline_summary(steps: List[Dict[str, Any]]) -> Dict[str, Any]:
+    passed = sum(1 for item in steps if item.get("status") == "PASS")
+    failed = sum(1 for item in steps if item.get("status") == "FAIL")
+    skipped = sum(1 for item in steps if item.get("status") == "SKIP")
+    return {
+        "total_steps": len(steps),
+        "passed": passed,
+        "failed": failed,
+        "skipped": skipped,
+        "overall": "PASS" if failed == 0 else "FAIL",
+    }
+
+
+def _normalize_text(value: str) -> str:
+    return (value or "").replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _apply_trim_trailing_whitespace(content: str, is_diff: bool) -> str:
+    if not is_diff:
+        return re.sub(r"[ \t]+$", "", content, flags=re.MULTILINE)
+    out_lines: List[str] = []
+    for raw in content.split("\n"):
+        if raw.startswith("+") and not raw.startswith("+++"):
+            out_lines.append(re.sub(r"[ \t]+$", "", raw))
+        else:
+            out_lines.append(raw)
+    return "\n".join(out_lines)
+
+
+def _apply_autofixes(content: str, accepted_fix_ids: List[str] | None = None) -> Dict[str, Any]:
+    normalized = _normalize_text(content)
+    is_diff = bool(re.search(r"^diff --git ", normalized, flags=re.MULTILINE))
+    available = [
+        {
+            "id": "trim-trailing-whitespace",
+            "title": "Trim trailing whitespace",
+            "description": "Removes trailing spaces/tabs. For diff input, only applies to added lines.",
+        },
+        {
+            "id": "ensure-eof-newline",
+            "title": "Ensure newline at EOF",
+            "description": "Adds a newline at the end of file if missing.",
+        },
+    ]
+    if not is_diff:
+        available.extend(
+            [
+                {
+                    "id": "compact-blank-lines",
+                    "title": "Compact blank lines",
+                    "description": "Reduces 3+ consecutive blank lines to 2.",
+                },
+                {
+                    "id": "modernize-printk-err",
+                    "title": "Modernize printk(KERN_ERR)",
+                    "description": "Converts printk(KERN_ERR ...) to pr_err(...).",
+                },
+            ]
+        )
+
+    selected = set(accepted_fix_ids or [item["id"] for item in available])
+    text_now = normalized
+    applied: List[Dict[str, Any]] = []
+
+    if "trim-trailing-whitespace" in selected:
+        after = _apply_trim_trailing_whitespace(text_now, is_diff=is_diff)
+        if after != text_now:
+            applied.append({"id": "trim-trailing-whitespace", "title": "Trim trailing whitespace"})
+            text_now = after
+
+    if "compact-blank-lines" in selected and not is_diff:
+        after = re.sub(r"\n{3,}", "\n\n", text_now)
+        if after != text_now:
+            applied.append({"id": "compact-blank-lines", "title": "Compact blank lines"})
+            text_now = after
+
+    if "modernize-printk-err" in selected and not is_diff:
+        after = re.sub(r"printk\s*\(\s*KERN_ERR\s*\"", 'pr_err("', text_now)
+        if after != text_now:
+            applied.append({"id": "modernize-printk-err", "title": "Modernize printk(KERN_ERR)"})
+            text_now = after
+
+    if "ensure-eof-newline" in selected:
+        after = text_now if text_now.endswith("\n") else (text_now + "\n")
+        if after != text_now:
+            applied.append({"id": "ensure-eof-newline", "title": "Ensure newline at EOF"})
+            text_now = after
+
+    before_lines = normalized.splitlines(keepends=True)
+    after_lines = text_now.splitlines(keepends=True)
+    diff_lines = list(
+        unified_diff(
+            before_lines,
+            after_lines,
+            fromfile="before",
+            tofile="after",
+            lineterm="",
+        )
+    )
+    diff_text = "\n".join(diff_lines)
+    changed_line_count = sum(
+        1
+        for line in diff_lines
+        if (line.startswith("+") or line.startswith("-"))
+        and not line.startswith("+++")
+        and not line.startswith("---")
+    )
+
+    return {
+        "available_fixes": available,
+        "selected_fix_ids": sorted(selected),
+        "applied_fixes": applied,
+        "has_changes": text_now != normalized,
+        "changed_line_count": changed_line_count,
+        "fixed_content": text_now,
+        "diff": diff_text[:32000],
+        "is_diff_input": is_diff,
+    }
+
+
+def _backup_key(session_id: str, path: str) -> str:
+    return f"{session_id}:{os.path.realpath(path)}"
+
+
+def _create_backup(session_id: str, target_path: str, original_content: str) -> str:
+    safe_session = secure_filename(session_id) or "default"
+    stamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    backup_dir = os.path.join("/tmp/akdw-autofix", safe_session)
+    os.makedirs(backup_dir, exist_ok=True)
+    backup_name = f"{secure_filename(os.path.basename(target_path))}.{stamp}.bak"
+    backup_path = os.path.join(backup_dir, backup_name)
+    with open(backup_path, "w", encoding="utf-8", errors="replace") as handle:
+        handle.write(original_content)
+    _autofix_backups[_backup_key(session_id, target_path)] = backup_path
+    return backup_path
+
+
 def _extract_patch_files(patch_content: str) -> List[str]:
     files: List[str] = []
     for line in (patch_content or "").splitlines():
@@ -346,31 +675,28 @@ def upload_patch():
 @patchwise_bp.post("/api/patchwise/review")
 def review_patch():
     _ensure_review_session_schema()
+    _ensure_patch_trace_schema()
     _ensure_upload_dir()
+    review_started = time.perf_counter()
+    trace_id = _new_trace_id("pwreview")
     payload = request.get_json() or {}
     session_id = (payload.get("session_id") or f"patch-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}").strip()
-    patch_content = payload.get("patch_content", "")
-    filepath = (payload.get("filepath") or "").strip()
-    upload_token = (payload.get("upload_token") or "").strip()
+    patch_content, filepath, patch_error, patch_error_status = _resolve_patch_payload(payload)
     context_url = (payload.get("context_url") or "").strip()
     model = (payload.get("model") or get_default_model()).strip()
 
-    if not patch_content.strip() and upload_token and upload_token in _uploaded_files:
-        filepath = _uploaded_files[upload_token]
-
-    if not patch_content.strip() and filepath:
-        if not _is_allowed_patch_path(filepath):
-            return jsonify({"ok": False, "error": "Path not allowed"}), 403
-        if not os.path.isfile(filepath):
-            return jsonify({"ok": False, "error": "Patch file not found"}), 404
-        try:
-            with open(filepath, "r", encoding="utf-8", errors="replace") as handle:
-                patch_content = handle.read()
-        except Exception as exc:
-            return jsonify({"ok": False, "error": f"Unable to read patch file: {exc}"}), 400
-
-    if not patch_content.strip():
-        return jsonify({"ok": False, "error": "patch_content or filepath is required"}), 400
+    if patch_error:
+        _log_patch_trace(
+            trace_id=trace_id,
+            session_id=session_id,
+            stage="ai_review",
+            tool="qgenie",
+            status="error",
+            duration_ms=int((time.perf_counter() - review_started) * 1000),
+            error_message=patch_error,
+            details={"filepath": filepath},
+        )
+        return jsonify({"ok": False, "error": patch_error}), patch_error_status
 
     context_text = _fetch_context_url(context_url) if context_url else ""
 
@@ -426,9 +752,26 @@ def review_patch():
     row.updated_at = datetime.utcnow()
     db.session.commit()
     log_activity("Reviewed patch: " + (row.patch_filename or session_id), "review")
+    _log_patch_trace(
+        trace_id=trace_id,
+        session_id=session_id,
+        stage="ai_review",
+        tool="qgenie",
+        status="ok",
+        duration_ms=int((time.perf_counter() - review_started) * 1000),
+        token_input=_estimate_tokens(full_prompt),
+        token_output=_estimate_tokens(ai_raw),
+        details={
+            "model": model,
+            "findings_count": len(findings),
+            "maintainers_count": len(maintainers),
+            "context_url": context_url or "",
+        },
+    )
 
     return jsonify({
         "ok": True,
+        "trace_id": trace_id,
         "session_id": session_id,
         "findings": findings,
         "summary": summary,
@@ -479,6 +822,410 @@ def run_checkpatch():
             "output": output,
             "warnings_count": warnings_count,
             "errors_count": errors_count,
+        }
+    )
+
+
+@patchwise_bp.post("/api/patchwise/pipeline")
+def run_pipeline():
+    _ensure_review_session_schema()
+    _ensure_patch_trace_schema()
+    payload = request.get_json() or {}
+    trace_id = _new_trace_id("pwpipeline")
+    session_id = (payload.get("session_id") or f"pipeline-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}").strip()
+    patch_content, filepath, patch_error, patch_error_status = _resolve_patch_payload(payload)
+    if patch_error:
+        _log_patch_trace(
+            trace_id=trace_id,
+            session_id=session_id,
+            stage="pipeline",
+            tool="pipeline",
+            status="error",
+            error_message=patch_error,
+            details={"filepath": filepath},
+        )
+        return jsonify({"ok": False, "error": patch_error, "trace_id": trace_id}), patch_error_status
+
+    started = time.perf_counter()
+    tmp_patch_path = ""
+    steps: List[Dict[str, Any]] = []
+    kernel_root = current_app.config.get("KERNEL_SRC_PATH", "/app/kernel")
+    try:
+        with tempfile.NamedTemporaryFile("w", suffix=".patch", delete=False, encoding="utf-8") as tmp:
+            tmp.write(patch_content)
+            tmp_patch_path = tmp.name
+
+        checkpatch_script = _find_script(kernel_root, "checkpatch.pl")
+        checkpatch_step = _run_shell_step(
+            step_id="checkpatch",
+            name="Checkpatch",
+            command=["perl", checkpatch_script, "--no-tree", tmp_patch_path] if checkpatch_script else None,
+            timeout=40,
+            skip_reason="checkpatch.pl not found under kernel tree" if not checkpatch_script else "",
+        )
+        cp_out = checkpatch_step.get("output_preview", "")
+        checkpatch_step["warnings_count"] = len(re.findall(r"\bWARNING\b", cp_out))
+        checkpatch_step["errors_count"] = len(re.findall(r"\bERROR\b", cp_out))
+        steps.append(checkpatch_step)
+
+        sparse_bin = shutil.which("sparse")
+        steps.append(
+            _run_shell_step(
+                step_id="sparse",
+                name="Sparse Probe",
+                command=[sparse_bin, "--version"] if sparse_bin else None,
+                timeout=20,
+                skip_reason="sparse not installed in runtime image" if not sparse_bin else "",
+            )
+        )
+
+        spatch_bin = shutil.which("spatch")
+        steps.append(
+            _run_shell_step(
+                step_id="coccinelle",
+                name="Coccinelle Probe",
+                command=[spatch_bin, "--version"] if spatch_bin else None,
+                timeout=20,
+                skip_reason="spatch (coccinelle) not installed in runtime image" if not spatch_bin else "",
+            )
+        )
+
+        make_bin = shutil.which("make")
+        kernel_makefile = os.path.join(kernel_root, "Makefile")
+        compile_skip = ""
+        compile_cmd = None
+        if not make_bin:
+            compile_skip = "make is not available"
+        elif not os.path.isfile(kernel_makefile):
+            compile_skip = "kernel Makefile not found"
+        else:
+            compile_cmd = [make_bin, "-C", kernel_root, "-s", "kernelversion"]
+        steps.append(
+            _run_shell_step(
+                step_id="compile_smoke",
+                name="Compile Smoke",
+                command=compile_cmd,
+                timeout=30,
+                skip_reason=compile_skip,
+            )
+        )
+    finally:
+        if tmp_patch_path and os.path.exists(tmp_patch_path):
+            try:
+                os.unlink(tmp_patch_path)
+            except Exception:
+                pass
+
+    summary = _build_pipeline_summary(steps)
+    findings = _collect_pipeline_findings(steps)
+    pipeline_duration = int((time.perf_counter() - started) * 1000)
+    combined_output = "\n".join(item.get("output_preview", "") for item in steps if item.get("output_preview"))
+    token_out = _estimate_tokens(combined_output)
+
+    for item in steps:
+        _log_patch_trace(
+            trace_id=trace_id,
+            session_id=session_id,
+            stage=f"pipeline:{item.get('id')}",
+            tool=item.get("id", ""),
+            status=(item.get("status") or "FAIL").lower(),
+            duration_ms=int(item.get("duration_ms") or 0),
+            exit_code=item.get("exit_code"),
+            token_input=_estimate_tokens(patch_content) if item.get("id") == "checkpatch" else 0,
+            token_output=_estimate_tokens(item.get("output_preview", "")),
+            error_message=item.get("error_message", ""),
+            details={
+                "name": item.get("name", ""),
+                "command": item.get("command", []),
+                "warnings_count": item.get("warnings_count", 0),
+                "errors_count": item.get("errors_count", 0),
+            },
+        )
+
+    _log_patch_trace(
+        trace_id=trace_id,
+        session_id=session_id,
+        stage="pipeline",
+        tool="pipeline",
+        status=("ok" if summary.get("failed", 0) == 0 else "error"),
+        duration_ms=pipeline_duration,
+        token_input=_estimate_tokens(patch_content),
+        token_output=token_out,
+        details={"summary": summary, "findings_count": len(findings), "filepath": filepath},
+    )
+
+    row = ReviewSession.query.filter_by(session_id=session_id).first()
+    if row and steps:
+        row.checkpatch_output = steps[0].get("output_preview", "")
+        row.updated_at = datetime.utcnow()
+        if summary.get("failed", 0) == 0:
+            row.status = "reviewed"
+        db.session.commit()
+
+    log_activity(f"Patch pipeline: {session_id} ({summary.get('overall', 'UNKNOWN')})", "review")
+    return jsonify(
+        {
+            "ok": True,
+            "trace_id": trace_id,
+            "session_id": session_id,
+            "summary": summary,
+            "steps": steps,
+            "findings": findings,
+            "token_budget": {
+                "used_estimate": _estimate_tokens(patch_content) + token_out,
+                "max": 131072,
+            },
+            "duration_ms": pipeline_duration,
+        }
+    )
+
+
+@patchwise_bp.post("/api/patchwise/autofix/preview")
+def preview_autofix():
+    _ensure_patch_trace_schema()
+    payload = request.get_json() or {}
+    session_id = (payload.get("session_id") or "autofix-preview").strip()
+    trace_id = _new_trace_id("pwautofix")
+    started = time.perf_counter()
+    patch_content, filepath, patch_error, patch_error_status = _resolve_patch_payload(payload)
+    if patch_error:
+        _log_patch_trace(
+            trace_id=trace_id,
+            session_id=session_id,
+            stage="autofix_preview",
+            tool="autofix",
+            status="error",
+            error_message=patch_error,
+            details={"filepath": filepath},
+        )
+        return jsonify({"ok": False, "error": patch_error, "trace_id": trace_id}), patch_error_status
+
+    accepted_fix_ids = payload.get("accepted_fix_ids", None)
+    if accepted_fix_ids is not None and not isinstance(accepted_fix_ids, list):
+        accepted_fix_ids = None
+
+    result = _apply_autofixes(patch_content, accepted_fix_ids=accepted_fix_ids)
+    _log_patch_trace(
+        trace_id=trace_id,
+        session_id=session_id,
+        stage="autofix_preview",
+        tool="autofix",
+        status="ok",
+        duration_ms=int((time.perf_counter() - started) * 1000),
+        token_input=_estimate_tokens(patch_content),
+        token_output=_estimate_tokens(result.get("diff", "")),
+        details={
+            "applied_count": len(result.get("applied_fixes", [])),
+            "changed_line_count": result.get("changed_line_count", 0),
+            "filepath": filepath,
+        },
+    )
+
+    return jsonify(
+        {
+            "ok": True,
+            "trace_id": trace_id,
+            "session_id": session_id,
+            "filepath": filepath,
+            **result,
+        }
+    )
+
+
+@patchwise_bp.post("/api/patchwise/autofix/apply")
+def apply_autofix():
+    _ensure_patch_trace_schema()
+    payload = request.get_json() or {}
+    session_id = (payload.get("session_id") or "autofix-apply").strip()
+    trace_id = _new_trace_id("pwautofix")
+    started = time.perf_counter()
+    patch_content, filepath, patch_error, patch_error_status = _resolve_patch_payload(payload)
+    if patch_error:
+        _log_patch_trace(
+            trace_id=trace_id,
+            session_id=session_id,
+            stage="autofix_apply",
+            tool="autofix",
+            status="error",
+            error_message=patch_error,
+            details={"filepath": filepath},
+        )
+        return jsonify({"ok": False, "error": patch_error, "trace_id": trace_id}), patch_error_status
+
+    accepted_fix_ids = payload.get("accepted_fix_ids", None)
+    if accepted_fix_ids is not None and not isinstance(accepted_fix_ids, list):
+        accepted_fix_ids = None
+
+    result = _apply_autofixes(patch_content, accepted_fix_ids=accepted_fix_ids)
+    if not result.get("has_changes"):
+        _log_patch_trace(
+            trace_id=trace_id,
+            session_id=session_id,
+            stage="autofix_apply",
+            tool="autofix",
+            status="ok",
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            token_input=_estimate_tokens(patch_content),
+            token_output=0,
+            details={"message": "No changes needed", "filepath": filepath},
+        )
+        return jsonify({"ok": True, "trace_id": trace_id, "session_id": session_id, "message": "No autofix changes needed", **result})
+
+    persisted = False
+    backup_path = ""
+    target_path = (payload.get("target_path") or filepath or "").strip()
+    if target_path:
+        if not _is_allowed_patch_path(target_path):
+            _log_patch_trace(
+                trace_id=trace_id,
+                session_id=session_id,
+                stage="autofix_apply",
+                tool="autofix",
+                status="error",
+                error_message="Path not allowed",
+                details={"target_path": target_path},
+            )
+            return jsonify({"ok": False, "error": "Path not allowed", "trace_id": trace_id}), 403
+        if os.path.isfile(target_path):
+            backup_path = _create_backup(session_id, target_path, patch_content)
+        with open(target_path, "w", encoding="utf-8", errors="replace") as handle:
+            handle.write(result.get("fixed_content", ""))
+        persisted = True
+        log_activity(f"Autofix applied: {os.path.basename(target_path)}", "review")
+
+    _log_patch_trace(
+        trace_id=trace_id,
+        session_id=session_id,
+        stage="autofix_apply",
+        tool="autofix",
+        status="ok",
+        duration_ms=int((time.perf_counter() - started) * 1000),
+        token_input=_estimate_tokens(patch_content),
+        token_output=_estimate_tokens(result.get("diff", "")),
+        details={
+            "persisted": persisted,
+            "backup_path": backup_path,
+            "target_path": target_path,
+            "applied_count": len(result.get("applied_fixes", [])),
+        },
+    )
+
+    return jsonify(
+        {
+            "ok": True,
+            "trace_id": trace_id,
+            "session_id": session_id,
+            "persisted": persisted,
+            "backup_path": backup_path,
+            "target_path": target_path,
+            **result,
+        }
+    )
+
+
+@patchwise_bp.post("/api/patchwise/autofix/rollback")
+def rollback_autofix():
+    _ensure_patch_trace_schema()
+    payload = request.get_json() or {}
+    session_id = (payload.get("session_id") or "autofix-rollback").strip()
+    trace_id = _new_trace_id("pwautofix")
+    started = time.perf_counter()
+    target_path = (payload.get("target_path") or "").strip()
+    if not target_path:
+        return jsonify({"ok": False, "error": "target_path is required", "trace_id": trace_id}), 400
+    if not _is_allowed_patch_path(target_path):
+        return jsonify({"ok": False, "error": "Path not allowed", "trace_id": trace_id}), 403
+
+    backup_path = _autofix_backups.get(_backup_key(session_id, target_path), "")
+    if not backup_path or not os.path.isfile(backup_path):
+        _log_patch_trace(
+            trace_id=trace_id,
+            session_id=session_id,
+            stage="autofix_rollback",
+            tool="autofix",
+            status="error",
+            error_message="No backup found",
+            details={"target_path": target_path},
+        )
+        return jsonify({"ok": False, "error": "No backup found for rollback", "trace_id": trace_id}), 404
+
+    try:
+        shutil.copyfile(backup_path, target_path)
+        with open(target_path, "r", encoding="utf-8", errors="replace") as handle:
+            restored_content = handle.read()
+    except Exception as exc:
+        _log_patch_trace(
+            trace_id=trace_id,
+            session_id=session_id,
+            stage="autofix_rollback",
+            tool="autofix",
+            status="error",
+            error_message=str(exc),
+            details={"target_path": target_path, "backup_path": backup_path},
+        )
+        return jsonify({"ok": False, "error": f"Rollback failed: {exc}", "trace_id": trace_id}), 500
+
+    log_activity(f"Autofix rollback: {os.path.basename(target_path)}", "review")
+    _log_patch_trace(
+        trace_id=trace_id,
+        session_id=session_id,
+        stage="autofix_rollback",
+        tool="autofix",
+        status="ok",
+        duration_ms=int((time.perf_counter() - started) * 1000),
+        token_output=_estimate_tokens(restored_content),
+        details={"target_path": target_path, "backup_path": backup_path},
+    )
+    return jsonify(
+        {
+            "ok": True,
+            "trace_id": trace_id,
+            "session_id": session_id,
+            "target_path": target_path,
+            "backup_path": backup_path,
+            "content": restored_content,
+        }
+    )
+
+
+@patchwise_bp.get("/api/patchwise/traces")
+def list_patch_traces():
+    _ensure_patch_trace_schema()
+    session_id = (request.args.get("session_id") or "").strip()
+    trace_id = (request.args.get("trace_id") or "").strip()
+    try:
+        limit = max(1, min(200, int(request.args.get("limit", "80"))))
+    except Exception:
+        limit = 80
+
+    query = PatchReviewTrace.query.order_by(PatchReviewTrace.created_at.desc(), PatchReviewTrace.id.desc())
+    if session_id:
+        query = query.filter(PatchReviewTrace.session_id == session_id)
+    if trace_id:
+        query = query.filter(PatchReviewTrace.trace_id == trace_id)
+
+    rows = query.limit(limit).all()
+    return jsonify(
+        {
+            "ok": True,
+            "rows": [
+                {
+                    "id": row.id,
+                    "trace_id": row.trace_id,
+                    "session_id": row.session_id,
+                    "stage": row.stage,
+                    "tool": row.tool,
+                    "status": row.status,
+                    "duration_ms": row.duration_ms,
+                    "exit_code": row.exit_code,
+                    "token_input": row.token_input,
+                    "token_output": row.token_output,
+                    "error_message": row.error_message or "",
+                    "details": _json_load(row.details_json, {}),
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                }
+                for row in rows
+            ],
         }
     )
 

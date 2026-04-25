@@ -11,6 +11,11 @@ window.AKDWPatchwise = (function () {
   let reviewProgressTimer = null;
   let sessionId = localStorage.getItem(sessionKey) || ("pw-" + Math.random().toString(36).slice(2, 10));
   localStorage.setItem(sessionKey, sessionId);
+  let activeTargetPath = "";
+  let autofixSelectedFixIds = [];
+  let lastAutofixPreview = null;
+  let lastAutofixBackupPath = "";
+  let lastTraceId = "";
 
   function fmtSize(bytes) {
     if (bytes < 1024) return bytes + " B";
@@ -102,10 +107,14 @@ window.AKDWPatchwise = (function () {
   function setActionState() {
     const ready = hasPatchContent();
     const reviewBtn = document.getElementById("runReviewBtn");
+    const pipelineBtn = document.getElementById("runPipelineBtn");
     const checkBtn = document.getElementById("runCheckpatchBtn");
+    const autofixBtn = document.getElementById("previewAutofixBtn");
     const exportBtn = document.getElementById("exportBtn");
+    const applyAutofixBtn = document.getElementById("applyAutofixBtn");
+    const rollbackAutofixBtn = document.getElementById("rollbackAutofixBtn");
 
-    [reviewBtn, checkBtn, exportBtn].forEach(function (btn) {
+    [reviewBtn, pipelineBtn, checkBtn, autofixBtn, exportBtn].forEach(function (btn) {
       if (!btn) return;
       btn.disabled = !ready || (btn.id === "exportBtn" && !hasResults);
       btn.classList.toggle("btn-disabled", btn.disabled);
@@ -113,6 +122,16 @@ window.AKDWPatchwise = (function () {
     });
 
     reviewBtn.classList.toggle("ready", ready && !hasResults);
+    if (applyAutofixBtn) {
+      const canApply = ready && !!(lastAutofixPreview && lastAutofixPreview.has_changes);
+      applyAutofixBtn.disabled = !canApply;
+      applyAutofixBtn.classList.toggle("btn-disabled", !canApply);
+    }
+    if (rollbackAutofixBtn) {
+      const canRollback = !!(activeTargetPath && lastAutofixBackupPath);
+      rollbackAutofixBtn.disabled = !canRollback;
+      rollbackAutofixBtn.classList.toggle("btn-disabled", !canRollback);
+    }
     if (hasResults) {
       exportBtn.style.borderColor = "rgba(16, 185, 129, 0.45)";
       exportBtn.style.boxShadow = "0 0 12px rgba(16, 185, 129, 0.35)";
@@ -155,6 +174,10 @@ window.AKDWPatchwise = (function () {
     list.innerHTML = "";
 
     if (!files.length) {
+      activeTargetPath = "";
+      autofixSelectedFixIds = [];
+      lastAutofixPreview = null;
+      lastAutofixBackupPath = "";
       onboarding.style.display = "grid";
       hint.style.display = "none";
       readyBanner.style.display = "none";
@@ -197,6 +220,7 @@ window.AKDWPatchwise = (function () {
       chip.appendChild(rm);
       chip.addEventListener("click", function () {
         document.getElementById("patchContent").value = f.content || "";
+        activeTargetPath = f.path || "";
         setActionState();
       });
       list.appendChild(chip);
@@ -204,20 +228,27 @@ window.AKDWPatchwise = (function () {
 
     if (files[0] && !document.getElementById("patchContent").value.trim()) {
       document.getElementById("patchContent").value = files[0].content || "";
+      activeTargetPath = files[0].path || "";
     }
     setActionState();
   }
 
   function setReviewRunning(isRunning) {
     const reviewBtn = document.getElementById("runReviewBtn");
+    const pipelineBtn = document.getElementById("runPipelineBtn");
     const hintBtn = document.getElementById("hintRunReviewBtn");
+    const hintPipelineBtn = document.getElementById("hintRunPipelineBtn");
     const placeholderBtn = document.getElementById("placeholderRunBtn");
     const checkBtn = document.getElementById("runCheckpatchBtn");
+    const autofixBtn = document.getElementById("previewAutofixBtn");
 
     if (isRunning) {
       reviewBtn.disabled = true;
+      pipelineBtn.disabled = true;
       checkBtn.disabled = true;
+      autofixBtn.disabled = true;
       hintBtn.disabled = true;
+      hintPipelineBtn.disabled = true;
       placeholderBtn.disabled = true;
       reviewBtn.classList.add("btn-disabled");
       reviewBtn.innerHTML = '<span class="btn-spinner"></span>Reviewing...';
@@ -225,7 +256,9 @@ window.AKDWPatchwise = (function () {
     }
 
     reviewBtn.innerHTML = "▶ Run AI Review";
+    pipelineBtn.disabled = false;
     hintBtn.disabled = false;
+    hintPipelineBtn.disabled = false;
     placeholderBtn.disabled = false;
     setActionState();
   }
@@ -274,7 +307,11 @@ window.AKDWPatchwise = (function () {
       if (!allowedExt.some(function (ext) { return lower.endsWith(ext); })) return;
       const reader = new FileReader();
       reader.onload = function () {
-        files.push({ name: file.name, size: file.size, content: reader.result || "" });
+        files.push({ name: file.name, size: file.size, content: reader.result || "", path: "" });
+        activeTargetPath = "";
+        autofixSelectedFixIds = [];
+        lastAutofixPreview = null;
+        lastAutofixBackupPath = "";
         renderFiles();
       };
       reader.readAsText(file);
@@ -319,7 +356,11 @@ window.AKDWPatchwise = (function () {
           document.getElementById("reviewSummary").textContent = readData.error || "Failed to load file";
           return;
         }
-        files = [{ name: entry.name, size: (readData.content || "").length, content: readData.content || "" }];
+        files = [{ name: entry.name, size: (readData.content || "").length, content: readData.content || "", path: entry.path }];
+        activeTargetPath = entry.path || "";
+        autofixSelectedFixIds = [];
+        lastAutofixPreview = null;
+        lastAutofixBackupPath = "";
         hasResults = false;
         reviewStarted = false;
         exportedReport = false;
@@ -392,6 +433,10 @@ window.AKDWPatchwise = (function () {
         sessionId = item.session_id;
         localStorage.setItem(sessionKey, sessionId);
         document.getElementById("patchContent").value = "";
+        activeTargetPath = "";
+        autofixSelectedFixIds = [];
+        lastAutofixPreview = null;
+        lastAutofixBackupPath = "";
         renderFindings(detail.session.findings || [], detail.session.summary || {});
         document.getElementById("reviewPlaceholder").style.display = "none";
         hasResults = (detail.session.findings || []).length > 0;
@@ -399,6 +444,7 @@ window.AKDWPatchwise = (function () {
         exportedReport = (item.status || "") === "exported";
         setStepState(true, reviewStarted, hasResults, exportedReport);
         setActionState();
+        loadTraceList();
       });
       root.appendChild(entry);
     });
@@ -578,6 +624,284 @@ window.AKDWPatchwise = (function () {
     }
   }
 
+  function fmtMs(ms) {
+    const value = Number(ms || 0);
+    if (value < 1000) return value + "ms";
+    return (value / 1000).toFixed(2) + "s";
+  }
+
+  function stepClass(status) {
+    const lower = String(status || "").toLowerCase();
+    if (lower === "pass") return "pass";
+    if (lower === "fail") return "fail";
+    return "skip";
+  }
+
+  function renderPipelineResult(data) {
+    const summaryBox = document.getElementById("pipelineSummary");
+    const stepsBox = document.getElementById("pipelineSteps");
+    const summary = data.summary || {};
+    const steps = data.steps || [];
+    summaryBox.style.display = "block";
+    summaryBox.innerHTML = [
+      "<strong>Pipeline</strong>",
+      '<div class="small-muted">Trace: ' + escapeHtml(data.trace_id || "") + "</div>",
+      '<div class="small-muted">Overall: ' + escapeHtml(summary.overall || "UNKNOWN") +
+      " · Passed: " + (summary.passed || 0) +
+      " · Failed: " + (summary.failed || 0) +
+      " · Skipped: " + (summary.skipped || 0) +
+      " · Duration: " + fmtMs(data.duration_ms || 0) + "</div>",
+    ].join("");
+
+    stepsBox.innerHTML = "";
+    if (!steps.length) {
+      stepsBox.innerHTML = '<div class="small-muted">No pipeline steps returned.</div>';
+      return;
+    }
+
+    steps.forEach(function (step) {
+      const card = document.createElement("div");
+      card.className = "pipeline-step " + stepClass(step.status);
+      const output = (step.output_preview || "").trim();
+      card.innerHTML = [
+        '<div class="pipeline-topline"><strong>' + escapeHtml(step.name || step.id || "Step") + "</strong>" +
+        '<span>' + escapeHtml(step.status || "UNKNOWN") + " · exit=" + escapeHtml(String(step.exit_code)) +
+        " · " + fmtMs(step.duration_ms || 0) + "</span></div>",
+        '<div class="small-muted">Warnings: ' + (step.warnings_count || 0) + " · Errors: " + (step.errors_count || 0) + "</div>",
+        output ? '<pre class="pipeline-output">' + escapeHtml(output.slice(0, 1400)) + "</pre>" : "",
+      ].join("");
+      stepsBox.appendChild(card);
+    });
+  }
+
+  async function loadTraceList(optionalTraceId) {
+    const traceList = document.getElementById("traceList");
+    const traceSummary = document.getElementById("traceSummary");
+    const params = new URLSearchParams();
+    params.set("session_id", sessionId);
+    params.set("limit", "40");
+    if (optionalTraceId) params.set("trace_id", optionalTraceId);
+    try {
+      const res = await fetch("/api/patchwise/traces?" + params.toString());
+      const data = await res.json();
+      const rows = data.rows || [];
+      if (!rows.length) {
+        traceSummary.textContent = "No traces yet for this session.";
+        traceList.innerHTML = "";
+        return;
+      }
+      traceSummary.textContent = "Showing " + rows.length + " latest trace entries.";
+      traceList.innerHTML = "";
+      rows.forEach(function (row) {
+        const item = document.createElement("div");
+        item.className = "trace-item";
+        const err = row.error_message ? (" · " + row.error_message) : "";
+        item.innerHTML = [
+          "<div><strong>" + escapeHtml(row.stage || "") + "</strong></div>",
+          "<div>" + escapeHtml((row.status || "").toUpperCase()) + " · exit=" + escapeHtml(String(row.exit_code)) +
+            " · " + fmtMs(row.duration_ms || 0) + "</div>",
+          "<div>trace=" + escapeHtml(row.trace_id || "") + " · in=" + (row.token_input || 0) +
+            " · out=" + (row.token_output || 0) + escapeHtml(err) + "</div>",
+        ].join("");
+        traceList.appendChild(item);
+      });
+    } catch (err) {
+      traceSummary.textContent = "Trace load failed.";
+    }
+  }
+
+  function renderAutofixPreview(data) {
+    const summary = document.getElementById("autofixSummary");
+    const fixesBox = document.getElementById("autofixFixes");
+    const diffBox = document.getElementById("autofixDiff");
+    const available = data.available_fixes || [];
+
+    if (!autofixSelectedFixIds.length) {
+      autofixSelectedFixIds = (data.selected_fix_ids || []).slice();
+    }
+
+    summary.textContent = data.has_changes
+      ? ("Changes ready · " + (data.changed_line_count || 0) + " lines impacted")
+      : "No autofix changes suggested for current selection.";
+
+    fixesBox.innerHTML = "";
+    available.forEach(function (fix) {
+      const row = document.createElement("label");
+      row.innerHTML = '<input type="checkbox" value="' + escapeHtml(fix.id || "") + '"' +
+        (autofixSelectedFixIds.indexOf(fix.id) >= 0 ? " checked" : "") + "> " +
+        escapeHtml(fix.title || fix.id || "Fix") +
+        '<span class="small-muted"> — ' + escapeHtml(fix.description || "") + "</span>";
+      const cb = row.querySelector("input");
+      cb.addEventListener("change", function () {
+        if (cb.checked && autofixSelectedFixIds.indexOf(fix.id) === -1) autofixSelectedFixIds.push(fix.id);
+        if (!cb.checked) autofixSelectedFixIds = autofixSelectedFixIds.filter(function (id) { return id !== fix.id; });
+        previewAutofix();
+      });
+      fixesBox.appendChild(row);
+    });
+
+    if (data.applied_fixes && data.applied_fixes.length) {
+      const applied = document.createElement("div");
+      applied.className = "small-muted";
+      applied.textContent = "Applied in preview: " + data.applied_fixes.map(function (f) { return f.title || f.id; }).join(", ");
+      fixesBox.appendChild(applied);
+    }
+
+    diffBox.textContent = (data.diff || "").trim() || "No diff generated.";
+  }
+
+  async function runPipeline() {
+    const patchContent = document.getElementById("patchContent").value;
+    if (!patchContent.trim()) return;
+
+    reviewStarted = true;
+    exportedReport = false;
+    setStepState(true, true, false, false);
+    setReviewRunning(true);
+    startReviewProgress();
+    const summaryBox = document.getElementById("pipelineSummary");
+    summaryBox.style.display = "block";
+    summaryBox.textContent = "Running deterministic pipeline...";
+
+    try {
+      const res = await fetch("/api/patchwise/pipeline", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          patch_content: patchContent,
+          target_path: activeTargetPath,
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        summaryBox.textContent = data.error || "Pipeline failed";
+        stopReviewProgress(false);
+        return;
+      }
+
+      lastTraceId = data.trace_id || "";
+      renderPipelineResult(data);
+      hasResults = true;
+      setStepState(true, true, true, exportedReport);
+      setActionState();
+      const findings = data.findings || [];
+      document.getElementById("checkpatchOutput").textContent =
+        "Pipeline findings: " + findings.length + (findings.length ? ("\n" + findings.map(function (f) { return "[" + f.severity + "] " + f.message; }).join("\n")) : "");
+      await loadTraceList(lastTraceId);
+      stopReviewProgress(true);
+    } catch (err) {
+      summaryBox.textContent = "Pipeline failed";
+      stopReviewProgress(false);
+    } finally {
+      setReviewRunning(false);
+    }
+  }
+
+  async function previewAutofix() {
+    const patchContent = document.getElementById("patchContent").value;
+    if (!patchContent.trim()) return;
+    const summary = document.getElementById("autofixSummary");
+    summary.textContent = "Generating autofix preview...";
+    try {
+      const res = await fetch("/api/patchwise/autofix/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          patch_content: patchContent,
+          target_path: activeTargetPath,
+          accepted_fix_ids: autofixSelectedFixIds.length ? autofixSelectedFixIds : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        summary.textContent = data.error || "Autofix preview failed";
+        return;
+      }
+      lastTraceId = data.trace_id || "";
+      lastAutofixPreview = data;
+      renderAutofixPreview(data);
+      setActionState();
+      await loadTraceList(lastTraceId);
+    } catch (err) {
+      summary.textContent = "Autofix preview failed";
+    }
+  }
+
+  async function applyAutofix() {
+    const patchContent = document.getElementById("patchContent").value;
+    if (!patchContent.trim()) return;
+    const summary = document.getElementById("autofixSummary");
+    summary.textContent = "Applying selected fixes...";
+    try {
+      const res = await fetch("/api/patchwise/autofix/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          patch_content: patchContent,
+          target_path: activeTargetPath,
+          accepted_fix_ids: autofixSelectedFixIds.length ? autofixSelectedFixIds : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        summary.textContent = data.error || "Autofix apply failed";
+        return;
+      }
+      lastTraceId = data.trace_id || "";
+      lastAutofixPreview = data;
+      if (data.fixed_content) {
+        document.getElementById("patchContent").value = data.fixed_content;
+        if (files[0]) files[0].content = data.fixed_content;
+      }
+      lastAutofixBackupPath = data.backup_path || "";
+      summary.textContent = data.persisted
+        ? "Fixes applied and saved to file. Backup recorded."
+        : "Fixes applied to editor content (not persisted to disk).";
+      renderAutofixPreview(data);
+      setActionState();
+      await loadTraceList(lastTraceId);
+    } catch (err) {
+      summary.textContent = "Autofix apply failed";
+    }
+  }
+
+  async function rollbackAutofix() {
+    const targetPath = activeTargetPath;
+    const summary = document.getElementById("autofixSummary");
+    if (!targetPath) {
+      summary.textContent = "Rollback requires a file loaded from an allowed path.";
+      return;
+    }
+    summary.textContent = "Rolling back latest applied autofix...";
+    try {
+      const res = await fetch("/api/patchwise/autofix/rollback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          target_path: targetPath,
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        summary.textContent = data.error || "Rollback failed";
+        return;
+      }
+      lastTraceId = data.trace_id || "";
+      document.getElementById("patchContent").value = data.content || "";
+      if (files[0]) files[0].content = data.content || "";
+      summary.textContent = "Rollback complete. Restored from backup.";
+      lastAutofixPreview = null;
+      setActionState();
+      await loadTraceList(lastTraceId);
+    } catch (err) {
+      summary.textContent = "Rollback failed";
+    }
+  }
+
   async function runReview() {
     const patchContent = document.getElementById("patchContent").value;
     const contextUrl = document.getElementById("contextUrl").value.trim();
@@ -608,6 +932,7 @@ window.AKDWPatchwise = (function () {
         return;
       }
 
+      lastTraceId = data.trace_id || "";
       hasResults = true;
       setStepState(true, true, true, false);
       setActionState();
@@ -617,6 +942,7 @@ window.AKDWPatchwise = (function () {
         : await fetchMaintainersFromPatch(patchContent);
       renderMaintainers(maintainers);
       loadSessionList();
+      await loadTraceList(lastTraceId);
       stopReviewProgress(true);
     } catch (err) {
       document.getElementById("reviewSummary").textContent = "Review failed";
@@ -733,16 +1059,22 @@ window.AKDWPatchwise = (function () {
     });
 
     document.getElementById("runReviewBtn").addEventListener("click", runReview);
+    document.getElementById("runPipelineBtn").addEventListener("click", runPipeline);
     document.getElementById("runCheckpatchBtn").addEventListener("click", runCheckpatch);
+    document.getElementById("previewAutofixBtn").addEventListener("click", previewAutofix);
+    document.getElementById("applyAutofixBtn").addEventListener("click", applyAutofix);
+    document.getElementById("rollbackAutofixBtn").addEventListener("click", rollbackAutofix);
     document.getElementById("exportBtn").addEventListener("click", exportReport);
     document.getElementById("placeholderRunBtn").addEventListener("click", runReview);
     document.getElementById("hintRunReviewBtn").addEventListener("click", runReview);
+    document.getElementById("hintRunPipelineBtn").addEventListener("click", runPipeline);
     document.getElementById("hintCheckpatchBtn").addEventListener("click", runCheckpatch);
     document.getElementById("pwAskBtn").addEventListener("click", askReviewer);
     document.getElementById("patchContent").addEventListener("input", function () {
       if (this.value.trim()) {
         setStepState(true, reviewStarted, hasResults, exportedReport);
       }
+      lastAutofixPreview = null;
       setActionState();
     });
 
@@ -752,6 +1084,7 @@ window.AKDWPatchwise = (function () {
     setActionState();
     setStepState(false, false, false, false);
     loadSessionList();
+    loadTraceList();
   }
 
   return { init: init };
