@@ -14,6 +14,7 @@ import uuid
 from difflib import unified_diff
 from datetime import datetime
 from pathlib import Path
+from threading import Lock, Thread
 from typing import Any, Dict, List
 
 import requests
@@ -33,6 +34,8 @@ _schema_checked = False
 _trace_schema_checked = False
 _uploaded_files: Dict[str, str] = {}
 _autofix_backups: Dict[str, str] = {}
+_pipeline_jobs: Dict[str, Dict[str, Any]] = {}
+_pipeline_jobs_lock = Lock()
 
 
 def _ensure_upload_dir() -> str:
@@ -564,6 +567,236 @@ def _create_backup(session_id: str, target_path: str, original_content: str) -> 
     return backup_path
 
 
+def _set_pipeline_job(job_id: str, updates: Dict[str, Any]) -> None:
+    with _pipeline_jobs_lock:
+        existing = _pipeline_jobs.get(job_id, {})
+        merged = dict(existing)
+        merged.update(updates or {})
+        _pipeline_jobs[job_id] = merged
+
+
+def _get_pipeline_job(job_id: str) -> Dict[str, Any] | None:
+    with _pipeline_jobs_lock:
+        existing = _pipeline_jobs.get(job_id)
+        return dict(existing) if existing else None
+
+
+def _prune_pipeline_jobs(max_items: int = 200) -> None:
+    with _pipeline_jobs_lock:
+        if len(_pipeline_jobs) <= max_items:
+            return
+        ordered = sorted(
+            _pipeline_jobs.items(),
+            key=lambda item: (item[1].get("updated_at") or item[1].get("created_at") or ""),
+        )
+        while len(ordered) > max_items:
+            job_id, _ = ordered.pop(0)
+            _pipeline_jobs.pop(job_id, None)
+
+
+def _execute_pipeline(
+    *,
+    session_id: str,
+    patch_content: str,
+    filepath: str,
+    trace_id: str,
+    progress_hook: Any = None,
+) -> Dict[str, Any]:
+    started = time.perf_counter()
+    tmp_patch_path = ""
+    steps: List[Dict[str, Any]] = []
+    kernel_root = current_app.config.get("KERNEL_SRC_PATH", "/app/kernel")
+
+    def _notify_progress(index: int, total: int, step: Dict[str, Any]) -> None:
+        if progress_hook:
+            try:
+                progress_hook(index=index, total=total, step=step)
+            except Exception:
+                pass
+
+    try:
+        with tempfile.NamedTemporaryFile("w", suffix=".patch", delete=False, encoding="utf-8") as tmp:
+            tmp.write(patch_content)
+            tmp_patch_path = tmp.name
+
+        checkpatch_script = _find_script(kernel_root, "checkpatch.pl")
+        checkpatch_step = _run_shell_step(
+            step_id="checkpatch",
+            name="Checkpatch",
+            command=["perl", checkpatch_script, "--no-tree", tmp_patch_path] if checkpatch_script else None,
+            timeout=40,
+            skip_reason="checkpatch.pl not found under kernel tree" if not checkpatch_script else "",
+        )
+        cp_out = checkpatch_step.get("output_preview", "")
+        checkpatch_step["warnings_count"] = len(re.findall(r"\bWARNING\b", cp_out))
+        checkpatch_step["errors_count"] = len(re.findall(r"\bERROR\b", cp_out))
+        steps.append(checkpatch_step)
+        _notify_progress(index=1, total=4, step=checkpatch_step)
+
+        sparse_bin = shutil.which("sparse")
+        sparse_step = _run_shell_step(
+            step_id="sparse",
+            name="Sparse Probe",
+            command=[sparse_bin, "--version"] if sparse_bin else None,
+            timeout=20,
+            skip_reason="sparse not installed in runtime image" if not sparse_bin else "",
+        )
+        steps.append(sparse_step)
+        _notify_progress(index=2, total=4, step=sparse_step)
+
+        spatch_bin = shutil.which("spatch")
+        cocc_step = _run_shell_step(
+            step_id="coccinelle",
+            name="Coccinelle Probe",
+            command=[spatch_bin, "--version"] if spatch_bin else None,
+            timeout=20,
+            skip_reason="spatch (coccinelle) not installed in runtime image" if not spatch_bin else "",
+        )
+        steps.append(cocc_step)
+        _notify_progress(index=3, total=4, step=cocc_step)
+
+        make_bin = shutil.which("make")
+        kernel_makefile = os.path.join(kernel_root, "Makefile")
+        compile_skip = ""
+        compile_cmd = None
+        if not make_bin:
+            compile_skip = "make is not available"
+        elif not os.path.isfile(kernel_makefile):
+            compile_skip = "kernel Makefile not found"
+        else:
+            compile_cmd = [make_bin, "-C", kernel_root, "-s", "kernelversion"]
+        compile_step = _run_shell_step(
+            step_id="compile_smoke",
+            name="Compile Smoke",
+            command=compile_cmd,
+            timeout=30,
+            skip_reason=compile_skip,
+        )
+        steps.append(compile_step)
+        _notify_progress(index=4, total=4, step=compile_step)
+    finally:
+        if tmp_patch_path and os.path.exists(tmp_patch_path):
+            try:
+                os.unlink(tmp_patch_path)
+            except Exception:
+                pass
+
+    summary = _build_pipeline_summary(steps)
+    findings = _collect_pipeline_findings(steps)
+    pipeline_duration = int((time.perf_counter() - started) * 1000)
+    combined_output = "\n".join(item.get("output_preview", "") for item in steps if item.get("output_preview"))
+    token_out = _estimate_tokens(combined_output)
+
+    for item in steps:
+        _log_patch_trace(
+            trace_id=trace_id,
+            session_id=session_id,
+            stage=f"pipeline:{item.get('id')}",
+            tool=item.get("id", ""),
+            status=(item.get("status") or "FAIL").lower(),
+            duration_ms=int(item.get("duration_ms") or 0),
+            exit_code=item.get("exit_code"),
+            token_input=_estimate_tokens(patch_content) if item.get("id") == "checkpatch" else 0,
+            token_output=_estimate_tokens(item.get("output_preview", "")),
+            error_message=item.get("error_message", ""),
+            details={
+                "name": item.get("name", ""),
+                "command": item.get("command", []),
+                "warnings_count": item.get("warnings_count", 0),
+                "errors_count": item.get("errors_count", 0),
+            },
+        )
+
+    _log_patch_trace(
+        trace_id=trace_id,
+        session_id=session_id,
+        stage="pipeline",
+        tool="pipeline",
+        status=("ok" if summary.get("failed", 0) == 0 else "error"),
+        duration_ms=pipeline_duration,
+        token_input=_estimate_tokens(patch_content),
+        token_output=token_out,
+        details={"summary": summary, "findings_count": len(findings), "filepath": filepath},
+    )
+
+    row = ReviewSession.query.filter_by(session_id=session_id).first()
+    if row and steps:
+        row.checkpatch_output = steps[0].get("output_preview", "")
+        row.updated_at = datetime.utcnow()
+        if summary.get("failed", 0) == 0:
+            row.status = "reviewed"
+        db.session.commit()
+
+    log_activity(f"Patch pipeline: {session_id} ({summary.get('overall', 'UNKNOWN')})", "review")
+    return {
+        "ok": True,
+        "trace_id": trace_id,
+        "session_id": session_id,
+        "summary": summary,
+        "steps": steps,
+        "findings": findings,
+        "token_budget": {
+            "used_estimate": _estimate_tokens(patch_content) + token_out,
+            "max": 131072,
+        },
+        "duration_ms": pipeline_duration,
+    }
+
+
+def _run_pipeline_job(app_obj: Any, job_id: str, session_id: str, patch_content: str, filepath: str, trace_id: str) -> None:
+    _set_pipeline_job(
+        job_id,
+        {
+            "job_id": job_id,
+            "session_id": session_id,
+            "trace_id": trace_id,
+            "status": "running",
+            "progress": 5,
+            "message": "Pipeline started",
+            "updated_at": datetime.utcnow().isoformat(),
+        },
+    )
+    started = time.perf_counter()
+    try:
+        with app_obj.app_context():
+            result = _execute_pipeline(
+                session_id=session_id,
+                patch_content=patch_content,
+                filepath=filepath,
+                trace_id=trace_id,
+                progress_hook=lambda index, total, step: _set_pipeline_job(
+                    job_id,
+                    {
+                        "status": "running",
+                        "progress": int((index / max(total, 1)) * 100),
+                        "current_step": step.get("name", ""),
+                        "updated_at": datetime.utcnow().isoformat(),
+                    },
+                ),
+            )
+        _set_pipeline_job(
+            job_id,
+            {
+                "status": "completed",
+                "progress": 100,
+                "result": result,
+                "duration_ms": int((time.perf_counter() - started) * 1000),
+                "updated_at": datetime.utcnow().isoformat(),
+            },
+        )
+    except Exception as exc:
+        _set_pipeline_job(
+            job_id,
+            {
+                "status": "failed",
+                "progress": 100,
+                "error": str(exc),
+                "duration_ms": int((time.perf_counter() - started) * 1000),
+                "updated_at": datetime.utcnow().isoformat(),
+            },
+        )
+
+
 def _extract_patch_files(patch_content: str) -> List[str]:
     files: List[str] = []
     for line in (patch_content or "").splitlines():
@@ -846,138 +1079,76 @@ def run_pipeline():
         )
         return jsonify({"ok": False, "error": patch_error, "trace_id": trace_id}), patch_error_status
 
-    started = time.perf_counter()
-    tmp_patch_path = ""
-    steps: List[Dict[str, Any]] = []
-    kernel_root = current_app.config.get("KERNEL_SRC_PATH", "/app/kernel")
-    try:
-        with tempfile.NamedTemporaryFile("w", suffix=".patch", delete=False, encoding="utf-8") as tmp:
-            tmp.write(patch_content)
-            tmp_patch_path = tmp.name
+    result = _execute_pipeline(
+        session_id=session_id,
+        patch_content=patch_content,
+        filepath=filepath,
+        trace_id=trace_id,
+    )
+    return jsonify(result)
 
-        checkpatch_script = _find_script(kernel_root, "checkpatch.pl")
-        checkpatch_step = _run_shell_step(
-            step_id="checkpatch",
-            name="Checkpatch",
-            command=["perl", checkpatch_script, "--no-tree", tmp_patch_path] if checkpatch_script else None,
-            timeout=40,
-            skip_reason="checkpatch.pl not found under kernel tree" if not checkpatch_script else "",
-        )
-        cp_out = checkpatch_step.get("output_preview", "")
-        checkpatch_step["warnings_count"] = len(re.findall(r"\bWARNING\b", cp_out))
-        checkpatch_step["errors_count"] = len(re.findall(r"\bERROR\b", cp_out))
-        steps.append(checkpatch_step)
 
-        sparse_bin = shutil.which("sparse")
-        steps.append(
-            _run_shell_step(
-                step_id="sparse",
-                name="Sparse Probe",
-                command=[sparse_bin, "--version"] if sparse_bin else None,
-                timeout=20,
-                skip_reason="sparse not installed in runtime image" if not sparse_bin else "",
-            )
-        )
-
-        spatch_bin = shutil.which("spatch")
-        steps.append(
-            _run_shell_step(
-                step_id="coccinelle",
-                name="Coccinelle Probe",
-                command=[spatch_bin, "--version"] if spatch_bin else None,
-                timeout=20,
-                skip_reason="spatch (coccinelle) not installed in runtime image" if not spatch_bin else "",
-            )
-        )
-
-        make_bin = shutil.which("make")
-        kernel_makefile = os.path.join(kernel_root, "Makefile")
-        compile_skip = ""
-        compile_cmd = None
-        if not make_bin:
-            compile_skip = "make is not available"
-        elif not os.path.isfile(kernel_makefile):
-            compile_skip = "kernel Makefile not found"
-        else:
-            compile_cmd = [make_bin, "-C", kernel_root, "-s", "kernelversion"]
-        steps.append(
-            _run_shell_step(
-                step_id="compile_smoke",
-                name="Compile Smoke",
-                command=compile_cmd,
-                timeout=30,
-                skip_reason=compile_skip,
-            )
-        )
-    finally:
-        if tmp_patch_path and os.path.exists(tmp_patch_path):
-            try:
-                os.unlink(tmp_patch_path)
-            except Exception:
-                pass
-
-    summary = _build_pipeline_summary(steps)
-    findings = _collect_pipeline_findings(steps)
-    pipeline_duration = int((time.perf_counter() - started) * 1000)
-    combined_output = "\n".join(item.get("output_preview", "") for item in steps if item.get("output_preview"))
-    token_out = _estimate_tokens(combined_output)
-
-    for item in steps:
-        _log_patch_trace(
-            trace_id=trace_id,
-            session_id=session_id,
-            stage=f"pipeline:{item.get('id')}",
-            tool=item.get("id", ""),
-            status=(item.get("status") or "FAIL").lower(),
-            duration_ms=int(item.get("duration_ms") or 0),
-            exit_code=item.get("exit_code"),
-            token_input=_estimate_tokens(patch_content) if item.get("id") == "checkpatch" else 0,
-            token_output=_estimate_tokens(item.get("output_preview", "")),
-            error_message=item.get("error_message", ""),
-            details={
-                "name": item.get("name", ""),
-                "command": item.get("command", []),
-                "warnings_count": item.get("warnings_count", 0),
-                "errors_count": item.get("errors_count", 0),
+@patchwise_bp.post("/api/patchwise/pipeline/start")
+def start_pipeline():
+    _ensure_review_session_schema()
+    _ensure_patch_trace_schema()
+    payload = request.get_json() or {}
+    session_id = (payload.get("session_id") or f"pipeline-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}").strip()
+    patch_content, filepath, patch_error, patch_error_status = _resolve_patch_payload(payload)
+    trace_id = _new_trace_id("pwpipeline")
+    job_id = _new_trace_id("pwjob")
+    if patch_error:
+        _set_pipeline_job(
+            job_id,
+            {
+                "job_id": job_id,
+                "session_id": session_id,
+                "trace_id": trace_id,
+                "status": "failed",
+                "progress": 100,
+                "error": patch_error,
+                "updated_at": datetime.utcnow().isoformat(),
             },
         )
+        return jsonify({"ok": False, "error": patch_error, "job_id": job_id, "trace_id": trace_id}), patch_error_status
 
-    _log_patch_trace(
-        trace_id=trace_id,
-        session_id=session_id,
-        stage="pipeline",
-        tool="pipeline",
-        status=("ok" if summary.get("failed", 0) == 0 else "error"),
-        duration_ms=pipeline_duration,
-        token_input=_estimate_tokens(patch_content),
-        token_output=token_out,
-        details={"summary": summary, "findings_count": len(findings), "filepath": filepath},
+    _prune_pipeline_jobs(200)
+    _set_pipeline_job(
+        job_id,
+        {
+            "job_id": job_id,
+            "session_id": session_id,
+            "trace_id": trace_id,
+            "status": "queued",
+            "progress": 0,
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+        },
     )
-
-    row = ReviewSession.query.filter_by(session_id=session_id).first()
-    if row and steps:
-        row.checkpatch_output = steps[0].get("output_preview", "")
-        row.updated_at = datetime.utcnow()
-        if summary.get("failed", 0) == 0:
-            row.status = "reviewed"
-        db.session.commit()
-
-    log_activity(f"Patch pipeline: {session_id} ({summary.get('overall', 'UNKNOWN')})", "review")
+    app_obj = current_app._get_current_object()
+    worker = Thread(
+        target=_run_pipeline_job,
+        args=(app_obj, job_id, session_id, patch_content, filepath, trace_id),
+        daemon=True,
+    )
+    worker.start()
     return jsonify(
         {
             "ok": True,
-            "trace_id": trace_id,
+            "job_id": job_id,
             "session_id": session_id,
-            "summary": summary,
-            "steps": steps,
-            "findings": findings,
-            "token_budget": {
-                "used_estimate": _estimate_tokens(patch_content) + token_out,
-                "max": 131072,
-            },
-            "duration_ms": pipeline_duration,
+            "trace_id": trace_id,
+            "status": "queued",
         }
     )
+
+
+@patchwise_bp.get("/api/patchwise/pipeline/status/<job_id>")
+def pipeline_status(job_id: str):
+    row = _get_pipeline_job(job_id)
+    if not row:
+        return jsonify({"ok": False, "error": "job not found"}), 404
+    return jsonify({"ok": True, **row})
 
 
 @patchwise_bp.post("/api/patchwise/autofix/preview")
@@ -1226,6 +1397,89 @@ def list_patch_traces():
                 }
                 for row in rows
             ],
+        }
+    )
+
+
+@patchwise_bp.get("/api/patchwise/analytics")
+def patchwise_analytics():
+    _ensure_patch_trace_schema()
+    session_id = (request.args.get("session_id") or "").strip()
+    try:
+        limit = max(10, min(1000, int(request.args.get("limit", "400"))))
+    except Exception:
+        limit = 400
+
+    query = PatchReviewTrace.query.order_by(PatchReviewTrace.created_at.desc(), PatchReviewTrace.id.desc())
+    if session_id:
+        query = query.filter(PatchReviewTrace.session_id == session_id)
+    rows = query.limit(limit).all()
+
+    if not rows:
+        return jsonify(
+            {
+                "ok": True,
+                "summary": {
+                    "total_events": 0,
+                    "distinct_traces": 0,
+                    "distinct_sessions": 0,
+                    "token_input_total": 0,
+                    "token_output_total": 0,
+                    "duration_total_ms": 0,
+                    "duration_avg_ms": 0,
+                    "error_events": 0,
+                    "success_events": 0,
+                },
+                "stage_breakdown": [],
+            }
+        )
+
+    distinct_traces = {row.trace_id for row in rows if row.trace_id}
+    distinct_sessions = {row.session_id for row in rows if row.session_id}
+    token_input_total = sum(int(row.token_input or 0) for row in rows)
+    token_output_total = sum(int(row.token_output or 0) for row in rows)
+    duration_total_ms = sum(int(row.duration_ms or 0) for row in rows)
+    error_events = sum(1 for row in rows if (row.status or "").lower() in {"error", "fail"})
+    success_events = sum(1 for row in rows if (row.status or "").lower() in {"ok", "pass"})
+
+    stage_agg: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        key = row.stage or "unknown"
+        item = stage_agg.setdefault(
+            key,
+            {
+                "stage": key,
+                "count": 0,
+                "errors": 0,
+                "duration_ms": 0,
+                "token_input": 0,
+                "token_output": 0,
+            },
+        )
+        item["count"] += 1
+        item["duration_ms"] += int(row.duration_ms or 0)
+        item["token_input"] += int(row.token_input or 0)
+        item["token_output"] += int(row.token_output or 0)
+        if (row.status or "").lower() in {"error", "fail"}:
+            item["errors"] += 1
+
+    stage_breakdown = sorted(stage_agg.values(), key=lambda item: item["count"], reverse=True)
+    return jsonify(
+        {
+            "ok": True,
+            "summary": {
+                "total_events": len(rows),
+                "distinct_traces": len(distinct_traces),
+                "distinct_sessions": len(distinct_sessions),
+                "token_input_total": token_input_total,
+                "token_output_total": token_output_total,
+                "duration_total_ms": duration_total_ms,
+                "duration_avg_ms": int(duration_total_ms / max(len(rows), 1)),
+                "error_events": error_events,
+                "success_events": success_events,
+                "error_rate_pct": round((error_events * 100.0) / max(len(rows), 1), 2),
+            },
+            "stage_breakdown": stage_breakdown[:24],
         }
     )
 

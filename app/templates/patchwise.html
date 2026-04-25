@@ -322,6 +322,42 @@
     font-size: 11px;
   }
 
+  .analytics-panel {
+    margin-top: 12px;
+    border-top: 1px solid var(--glass-border);
+    padding-top: 10px;
+  }
+
+  .analytics-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .analytics-chip {
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    padding: 6px 8px;
+    background: rgba(255,255,255,0.02);
+    font-size: 11px;
+  }
+
+  .analytics-stage-list {
+    display: grid;
+    gap: 6px;
+    max-height: 180px;
+    overflow: auto;
+  }
+
+  .analytics-stage {
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-size: 11px;
+    background: rgba(255,255,255,0.02);
+  }
+
   .results-enter {
     opacity: 0;
     transform: translateY(10px);
@@ -617,6 +653,14 @@
         <h4>Execution Trace</h4>
         <div id="traceSummary" class="small-muted">Trace logs will appear after review/pipeline/autofix operations.</div>
         <div id="traceList" class="trace-list"></div>
+      </div>
+      <div class="analytics-panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <h4 style="margin:0;">Trace Analytics</h4>
+          <button id="refreshAnalyticsBtn" class="btn-secondary btn-xs" type="button">Refresh</button>
+        </div>
+        <div id="analyticsSummary" class="analytics-grid"></div>
+        <div id="analyticsStages" class="analytics-stage-list"></div>
       </div>
     </aside>
   </div>

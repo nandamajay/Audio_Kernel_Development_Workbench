@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -160,6 +161,47 @@ def run_observability_extras(base_url: str) -> List[CheckResult]:
     s, body, parsed = request_json(base_url, "/api/patchwise/traces?limit=1", method="GET")
     ok = s == 200 and isinstance(parsed, dict) and parsed.get("ok") is True and isinstance(parsed.get("rows"), list)
     extras.append(CheckResult(name="EXTRA_PATCHWISE_TRACES", ok=ok, note=f"GET /api/patchwise/traces?limit=1 => {s}"))
+
+    s, body, parsed = request_json(
+        base_url,
+        "/api/patchwise/pipeline/start",
+        method="POST",
+        data={"session_id": "extra-pipeline-async", "patch_content": "diff --git a/a.c b/a.c\n"},
+    )
+    job_id = (parsed or {}).get("job_id") if isinstance(parsed, dict) else ""
+    ok = s == 200 and bool(job_id)
+    extras.append(CheckResult(name="EXTRA_PATCHWISE_PIPELINE_ASYNC_START", ok=ok, note=f"POST /api/patchwise/pipeline/start => {s}"))
+    if job_id:
+        status_ok = False
+        final_status = "unknown"
+        for _ in range(30):
+            s2, body2, parsed2 = request_json(base_url, f"/api/patchwise/pipeline/status/{job_id}", method="GET")
+            if s2 != 200 or not isinstance(parsed2, dict) or parsed2.get("ok") is not True:
+                break
+            final_status = str(parsed2.get("status") or "unknown")
+            if final_status in {"completed", "failed"}:
+                status_ok = True
+                break
+            time.sleep(1)
+        extras.append(
+            CheckResult(
+                name="EXTRA_PATCHWISE_PIPELINE_ASYNC_STATUS",
+                ok=status_ok,
+                note=f"GET /api/patchwise/pipeline/status/<job> => {final_status}",
+            )
+        )
+    else:
+        extras.append(
+            CheckResult(
+                name="EXTRA_PATCHWISE_PIPELINE_ASYNC_STATUS",
+                ok=False,
+                note="job_id missing from async start",
+            )
+        )
+
+    s, body, parsed = request_json(base_url, "/api/patchwise/analytics?limit=50", method="GET")
+    ok = s == 200 and isinstance(parsed, dict) and parsed.get("ok") is True and isinstance(parsed.get("summary"), dict)
+    extras.append(CheckResult(name="EXTRA_PATCHWISE_ANALYTICS", ok=ok, note=f"GET /api/patchwise/analytics?limit=50 => {s}"))
 
     return extras
 

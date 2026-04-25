@@ -445,6 +445,7 @@ window.AKDWPatchwise = (function () {
         setStepState(true, reviewStarted, hasResults, exportedReport);
         setActionState();
         loadTraceList();
+        loadAnalytics();
       });
       root.appendChild(entry);
     });
@@ -630,6 +631,14 @@ window.AKDWPatchwise = (function () {
     return (value / 1000).toFixed(2) + "s";
   }
 
+  function fmtInt(n) {
+    return Number(n || 0).toLocaleString();
+  }
+
+  function delay(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+
   function stepClass(status) {
     const lower = String(status || "").toLowerCase();
     if (lower === "pass") return "pass";
@@ -674,6 +683,18 @@ window.AKDWPatchwise = (function () {
     });
   }
 
+  function renderPipelineJobProgress(job) {
+    const summaryBox = document.getElementById("pipelineSummary");
+    summaryBox.style.display = "block";
+    summaryBox.innerHTML = [
+      "<strong>Pipeline Job</strong>",
+      '<div class="small-muted">Job: ' + escapeHtml(job.job_id || "") + " · Trace: " + escapeHtml(job.trace_id || "") + "</div>",
+      '<div class="small-muted">Status: ' + escapeHtml((job.status || "").toUpperCase()) +
+      " · Progress: " + escapeHtml(String(job.progress || 0)) + "%" +
+      (job.current_step ? (" · Step: " + escapeHtml(job.current_step)) : "") + "</div>",
+    ].join("");
+  }
+
   async function loadTraceList(optionalTraceId) {
     const traceList = document.getElementById("traceList");
     const traceSummary = document.getElementById("traceSummary");
@@ -707,6 +728,63 @@ window.AKDWPatchwise = (function () {
       });
     } catch (err) {
       traceSummary.textContent = "Trace load failed.";
+    }
+  }
+
+  function renderAnalytics(data) {
+    const summaryBox = document.getElementById("analyticsSummary");
+    const stagesBox = document.getElementById("analyticsStages");
+    if (!summaryBox || !stagesBox) return;
+
+    const summary = data.summary || {};
+    const chips = [
+      "Events: " + fmtInt(summary.total_events),
+      "Trace IDs: " + fmtInt(summary.distinct_traces),
+      "Sessions: " + fmtInt(summary.distinct_sessions),
+      "Errors: " + fmtInt(summary.error_events) + " (" + (summary.error_rate_pct || 0) + "%)",
+      "Input Tokens: " + fmtInt(summary.token_input_total),
+      "Output Tokens: " + fmtInt(summary.token_output_total),
+      "Total Duration: " + fmtMs(summary.duration_total_ms || 0),
+      "Avg Duration: " + fmtMs(summary.duration_avg_ms || 0),
+    ];
+    summaryBox.innerHTML = chips.map(function (textValue) {
+      return '<div class="analytics-chip">' + escapeHtml(textValue) + "</div>";
+    }).join("");
+
+    stagesBox.innerHTML = "";
+    const stageRows = data.stage_breakdown || [];
+    if (!stageRows.length) {
+      stagesBox.innerHTML = '<div class="small-muted">No stage analytics yet.</div>';
+      return;
+    }
+    stageRows.slice(0, 16).forEach(function (row) {
+      const div = document.createElement("div");
+      div.className = "analytics-stage";
+      div.innerHTML = [
+        "<strong>" + escapeHtml(row.stage || "unknown") + "</strong>",
+        "<div>count=" + fmtInt(row.count) + " · errors=" + fmtInt(row.errors) + "</div>",
+        "<div>dur=" + fmtMs(row.duration_ms || 0) + " · in=" + fmtInt(row.token_input) + " · out=" + fmtInt(row.token_output) + "</div>",
+      ].join("");
+      stagesBox.appendChild(div);
+    });
+  }
+
+  async function loadAnalytics() {
+    const summaryBox = document.getElementById("analyticsSummary");
+    const stagesBox = document.getElementById("analyticsStages");
+    if (!summaryBox || !stagesBox) return;
+    try {
+      const res = await fetch("/api/patchwise/analytics?session_id=" + encodeURIComponent(sessionId) + "&limit=400");
+      const data = await res.json();
+      if (!data.ok) {
+        summaryBox.innerHTML = '<div class="small-muted">Analytics unavailable.</div>';
+        stagesBox.innerHTML = "";
+        return;
+      }
+      renderAnalytics(data);
+    } catch (err) {
+      summaryBox.innerHTML = '<div class="small-muted">Analytics load failed.</div>';
+      stagesBox.innerHTML = "";
     }
   }
 
@@ -761,10 +839,10 @@ window.AKDWPatchwise = (function () {
     startReviewProgress();
     const summaryBox = document.getElementById("pipelineSummary");
     summaryBox.style.display = "block";
-    summaryBox.textContent = "Running deterministic pipeline...";
+    summaryBox.textContent = "Queueing pipeline job...";
 
     try {
-      const res = await fetch("/api/patchwise/pipeline", {
+      const res = await fetch("/api/patchwise/pipeline/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -779,19 +857,46 @@ window.AKDWPatchwise = (function () {
         stopReviewProgress(false);
         return;
       }
-
+      const jobId = data.job_id || "";
       lastTraceId = data.trace_id || "";
-      renderPipelineResult(data);
+      renderPipelineJobProgress(data);
+
+      let finalPayload = null;
+      const startedAt = Date.now();
+      while ((Date.now() - startedAt) < 240000) {
+        await delay(1000);
+        const statusRes = await fetch("/api/patchwise/pipeline/status/" + encodeURIComponent(jobId));
+        const statusData = await statusRes.json();
+        if (!statusData.ok) {
+          throw new Error(statusData.error || "Pipeline job status failed");
+        }
+        renderPipelineJobProgress(statusData);
+        if (statusData.status === "completed") {
+          finalPayload = statusData.result || {};
+          break;
+        }
+        if (statusData.status === "failed") {
+          throw new Error(statusData.error || "Pipeline failed");
+        }
+      }
+
+      if (!finalPayload) {
+        throw new Error("Pipeline job timed out");
+      }
+
+      lastTraceId = finalPayload.trace_id || lastTraceId;
+      renderPipelineResult(finalPayload);
       hasResults = true;
       setStepState(true, true, true, exportedReport);
       setActionState();
-      const findings = data.findings || [];
+      const findings = finalPayload.findings || [];
       document.getElementById("checkpatchOutput").textContent =
         "Pipeline findings: " + findings.length + (findings.length ? ("\n" + findings.map(function (f) { return "[" + f.severity + "] " + f.message; }).join("\n")) : "");
       await loadTraceList(lastTraceId);
+      await loadAnalytics();
       stopReviewProgress(true);
     } catch (err) {
-      summaryBox.textContent = "Pipeline failed";
+      summaryBox.textContent = "Pipeline failed: " + (err && err.message ? err.message : "unknown error");
       stopReviewProgress(false);
     } finally {
       setReviewRunning(false);
@@ -824,6 +929,7 @@ window.AKDWPatchwise = (function () {
       renderAutofixPreview(data);
       setActionState();
       await loadTraceList(lastTraceId);
+      await loadAnalytics();
     } catch (err) {
       summary.textContent = "Autofix preview failed";
     }
@@ -863,6 +969,7 @@ window.AKDWPatchwise = (function () {
       renderAutofixPreview(data);
       setActionState();
       await loadTraceList(lastTraceId);
+      await loadAnalytics();
     } catch (err) {
       summary.textContent = "Autofix apply failed";
     }
@@ -897,6 +1004,7 @@ window.AKDWPatchwise = (function () {
       lastAutofixPreview = null;
       setActionState();
       await loadTraceList(lastTraceId);
+      await loadAnalytics();
     } catch (err) {
       summary.textContent = "Rollback failed";
     }
@@ -943,6 +1051,7 @@ window.AKDWPatchwise = (function () {
       renderMaintainers(maintainers);
       loadSessionList();
       await loadTraceList(lastTraceId);
+      await loadAnalytics();
       stopReviewProgress(true);
     } catch (err) {
       document.getElementById("reviewSummary").textContent = "Review failed";
@@ -1070,6 +1179,7 @@ window.AKDWPatchwise = (function () {
     document.getElementById("hintRunPipelineBtn").addEventListener("click", runPipeline);
     document.getElementById("hintCheckpatchBtn").addEventListener("click", runCheckpatch);
     document.getElementById("pwAskBtn").addEventListener("click", askReviewer);
+    document.getElementById("refreshAnalyticsBtn").addEventListener("click", loadAnalytics);
     document.getElementById("patchContent").addEventListener("input", function () {
       if (this.value.trim()) {
         setStepState(true, reviewStarted, hasResults, exportedReport);
@@ -1085,6 +1195,7 @@ window.AKDWPatchwise = (function () {
     setStepState(false, false, false, false);
     loadSessionList();
     loadTraceList();
+    loadAnalytics();
   }
 
   return { init: init };
