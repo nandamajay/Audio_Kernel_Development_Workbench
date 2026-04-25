@@ -83,17 +83,7 @@ jobs:
         run: |
           for i in $(seq 1 60); do
             code=$(curl -s -o /tmp/health.json -w "%{http_code}" http://localhost:5001/health || true)
-            if [ "$code" = "200" ] && python3 - <<'PY'
-import json
-import sys
-try:
-    with open("/tmp/health.json", "r", encoding="utf-8") as f:
-        data = json.load(f)
-except Exception:
-    sys.exit(1)
-sys.exit(0 if data.get("status") == "ok" else 1)
-PY
-            then
+            if [ "$code" = "200" ] && python3 -c "import json,sys; d=json.load(open('/tmp/health.json')); sys.exit(0 if d.get('status')=='ok' else 1)" >/dev/null 2>&1; then
               echo "AKDW healthy"
               cat /tmp/health.json
               exit 0
