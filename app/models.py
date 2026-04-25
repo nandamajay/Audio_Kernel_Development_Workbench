@@ -117,6 +117,31 @@ class PatchReviewTrace(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 
+class PatchPipelineJob(db.Model):
+    __tablename__ = "patch_pipeline_jobs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    job_id = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    session_id = db.Column(db.String(64), nullable=False, index=True)
+    trace_id = db.Column(db.String(64), nullable=False, index=True)
+    status = db.Column(db.String(24), nullable=False, default="queued")
+    progress = db.Column(db.Integer, nullable=False, default=0)
+    current_step = db.Column(db.String(128), nullable=True)
+    error_message = db.Column(db.Text, nullable=True)
+    result_json = db.Column(db.Text, nullable=True, default="{}")
+    payload_json = db.Column(db.Text, nullable=True, default="{}")
+    cancel_requested = db.Column(db.Boolean, nullable=False, default=False)
+    retry_of = db.Column(db.String(64), nullable=True)
+    duration_ms = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+
 class UpstreamPatch(db.Model):
     __tablename__ = "upstream_patches"
 

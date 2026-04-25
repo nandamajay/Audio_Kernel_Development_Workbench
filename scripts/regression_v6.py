@@ -179,7 +179,7 @@ def run_observability_extras(base_url: str) -> List[CheckResult]:
             if s2 != 200 or not isinstance(parsed2, dict) or parsed2.get("ok") is not True:
                 break
             final_status = str(parsed2.get("status") or "unknown")
-            if final_status in {"completed", "failed"}:
+            if final_status in {"completed", "failed", "canceled"}:
                 status_ok = True
                 break
             time.sleep(1)
@@ -190,6 +190,19 @@ def run_observability_extras(base_url: str) -> List[CheckResult]:
                 note=f"GET /api/patchwise/pipeline/status/<job> => {final_status}",
             )
         )
+
+        s3, body3, parsed3 = request_json(base_url, f"/api/patchwise/pipeline/cancel/{job_id}", method="POST", data={})
+        cancel_ok = s3 == 200 and isinstance(parsed3, dict) and parsed3.get("ok") is True
+        extras.append(CheckResult(name="EXTRA_PATCHWISE_PIPELINE_CANCEL", ok=cancel_ok, note=f"POST /api/patchwise/pipeline/cancel/<job> => {s3}"))
+
+        s4, body4, parsed4 = request_json(base_url, f"/api/patchwise/pipeline/retry/{job_id}", method="POST", data={})
+        retry_job = (parsed4 or {}).get("job_id") if isinstance(parsed4, dict) else ""
+        retry_ok = s4 == 200 and bool(retry_job)
+        extras.append(CheckResult(name="EXTRA_PATCHWISE_PIPELINE_RETRY", ok=retry_ok, note=f"POST /api/patchwise/pipeline/retry/<job> => {s4}"))
+
+        s5, body5, parsed5 = request_json(base_url, "/api/patchwise/pipeline/history?limit=5", method="GET")
+        history_ok = s5 == 200 and isinstance(parsed5, dict) and parsed5.get("ok") is True and isinstance(parsed5.get("rows"), list)
+        extras.append(CheckResult(name="EXTRA_PATCHWISE_PIPELINE_HISTORY", ok=history_ok, note=f"GET /api/patchwise/pipeline/history?limit=5 => {s5}"))
     else:
         extras.append(
             CheckResult(
@@ -198,6 +211,9 @@ def run_observability_extras(base_url: str) -> List[CheckResult]:
                 note="job_id missing from async start",
             )
         )
+        extras.append(CheckResult(name="EXTRA_PATCHWISE_PIPELINE_CANCEL", ok=False, note="job_id missing from async start"))
+        extras.append(CheckResult(name="EXTRA_PATCHWISE_PIPELINE_RETRY", ok=False, note="job_id missing from async start"))
+        extras.append(CheckResult(name="EXTRA_PATCHWISE_PIPELINE_HISTORY", ok=False, note="job_id missing from async start"))
 
     s, body, parsed = request_json(base_url, "/api/patchwise/analytics?limit=50", method="GET")
     ok = s == 200 and isinstance(parsed, dict) and parsed.get("ok") is True and isinstance(parsed.get("summary"), dict)

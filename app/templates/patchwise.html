@@ -223,6 +223,28 @@
     gap: 8px;
   }
 
+  .pipeline-history {
+    margin-top: 10px;
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.02);
+    display: grid;
+    gap: 6px;
+  }
+
+  .pipeline-history-item {
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-size: 11px;
+    background: rgba(255,255,255,0.02);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }
+
   .pipeline-step {
     border: 1px solid var(--glass-border);
     border-radius: 10px;
@@ -600,6 +622,7 @@
       <div class="patch-actions">
         <button id="runReviewBtn" class="btn-primary btn-run-review btn-disabled" type="button" title="Load a patch file first">▶ Run AI Review</button>
         <button id="runPipelineBtn" class="btn-secondary btn-disabled" type="button" title="Load a patch file first">🧪 Run Full Pipeline</button>
+        <button id="cancelPipelineBtn" class="btn-danger btn-disabled" type="button" title="Cancel active pipeline job" disabled>🛑 Cancel Pipeline</button>
         <button id="runCheckpatchBtn" class="btn-secondary btn-disabled" type="button" title="Load a patch file first">⚙ Run Checkpatch</button>
         <button id="previewAutofixBtn" class="btn-secondary btn-disabled" type="button" title="Load a patch file first">🩹 Autofix Preview</button>
         <button id="exportBtn" class="btn-secondary btn-disabled" type="button" title="Load a patch file first">⬇ Export Report</button>
@@ -636,6 +659,13 @@
       </div>
       <div id="pipelineSummary" class="pipeline-summary"></div>
       <div id="pipelineSteps" class="pipeline-steps"></div>
+      <div class="pipeline-history">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <strong>Pipeline Jobs</strong>
+          <button id="refreshPipelineHistoryBtn" class="btn-secondary btn-xs" type="button">Refresh</button>
+        </div>
+        <div id="pipelineHistoryList"></div>
+      </div>
       <div id="reviewPlaceholder" class="result-placeholder">
         <strong>🔍 Review Results</strong>
         <span>Results will appear here after you click "Run AI Review".</span>

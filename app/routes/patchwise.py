@@ -24,7 +24,7 @@ from sqlalchemy import inspect, text
 from werkzeug.utils import secure_filename
 
 from app.config import MODEL_METADATA, get_available_models, get_default_model
-from app.models import PatchReviewTrace, ReviewEvidence, ReviewSession, db
+from app.models import PatchPipelineJob, PatchReviewTrace, ReviewEvidence, ReviewSession, db
 from app.services.activity_service import log_activity
 from app.services.env_service import resolve_ssl_verify
 
@@ -32,6 +32,7 @@ from app.services.env_service import resolve_ssl_verify
 patchwise_bp = Blueprint("patchwise", __name__)
 _schema_checked = False
 _trace_schema_checked = False
+_pipeline_schema_checked = False
 _uploaded_files: Dict[str, str] = {}
 _autofix_backups: Dict[str, str] = {}
 _pipeline_jobs: Dict[str, Dict[str, Any]] = {}
@@ -274,6 +275,39 @@ def _ensure_patch_trace_schema() -> None:
     _trace_schema_checked = True
 
 
+def _ensure_patch_pipeline_job_schema() -> None:
+    global _pipeline_schema_checked
+    if _pipeline_schema_checked:
+        return
+    inspector = inspect(db.engine)
+    if not inspector.has_table("patch_pipeline_jobs"):
+        db.session.execute(
+            text(
+                """
+                CREATE TABLE patch_pipeline_jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id VARCHAR(64) NOT NULL UNIQUE,
+                    session_id VARCHAR(64) NOT NULL,
+                    trace_id VARCHAR(64) NOT NULL,
+                    status VARCHAR(24) NOT NULL DEFAULT 'queued',
+                    progress INTEGER NOT NULL DEFAULT 0,
+                    current_step VARCHAR(128),
+                    error_message TEXT,
+                    result_json TEXT DEFAULT '{}',
+                    payload_json TEXT DEFAULT '{}',
+                    cancel_requested BOOLEAN NOT NULL DEFAULT 0,
+                    retry_of VARCHAR(64),
+                    duration_ms INTEGER NOT NULL DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+        db.session.commit()
+    _pipeline_schema_checked = True
+
+
 def _new_trace_id(prefix: str = "pwtrace") -> str:
     return f"{prefix}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
 
@@ -434,12 +468,19 @@ def _build_pipeline_summary(steps: List[Dict[str, Any]]) -> Dict[str, Any]:
     passed = sum(1 for item in steps if item.get("status") == "PASS")
     failed = sum(1 for item in steps if item.get("status") == "FAIL")
     skipped = sum(1 for item in steps if item.get("status") == "SKIP")
+    canceled = sum(1 for item in steps if item.get("status") == "CANCELED")
+    overall = "PASS"
+    if canceled:
+        overall = "CANCELED"
+    elif failed:
+        overall = "FAIL"
     return {
         "total_steps": len(steps),
         "passed": passed,
         "failed": failed,
         "skipped": skipped,
-        "overall": "PASS" if failed == 0 else "FAIL",
+        "canceled": canceled,
+        "overall": overall,
     }
 
 
@@ -567,18 +608,108 @@ def _create_backup(session_id: str, target_path: str, original_content: str) -> 
     return backup_path
 
 
+def _pipeline_job_row_to_dict(row: PatchPipelineJob, include_result: bool = True) -> Dict[str, Any]:
+    data = {
+        "job_id": row.job_id,
+        "session_id": row.session_id,
+        "trace_id": row.trace_id,
+        "status": row.status,
+        "progress": int(row.progress or 0),
+        "current_step": row.current_step or "",
+        "error": row.error_message or "",
+        "cancel_requested": bool(row.cancel_requested),
+        "duration_ms": int(row.duration_ms or 0),
+        "retry_of": row.retry_of or "",
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+    if include_result:
+        data["result"] = _json_load(row.result_json, {})
+    return data
+
+
+def _upsert_pipeline_job_db(job_id: str, updates: Dict[str, Any], *, payload: Dict[str, Any] | None = None) -> None:
+    try:
+        _ensure_patch_pipeline_job_schema()
+        row = PatchPipelineJob.query.filter_by(job_id=job_id).first()
+        if not row:
+            row = PatchPipelineJob(
+                job_id=job_id,
+                session_id=str((updates or {}).get("session_id") or ""),
+                trace_id=str((updates or {}).get("trace_id") or ""),
+                payload_json=json.dumps(payload or {}),
+            )
+            db.session.add(row)
+
+        if updates is not None:
+            if "session_id" in updates and updates["session_id"] is not None:
+                row.session_id = str(updates["session_id"])
+            if "trace_id" in updates and updates["trace_id"] is not None:
+                row.trace_id = str(updates["trace_id"])
+            if "status" in updates and updates["status"] is not None:
+                row.status = str(updates["status"])
+            if "progress" in updates and updates["progress"] is not None:
+                row.progress = int(updates["progress"])
+            if "current_step" in updates:
+                row.current_step = (updates.get("current_step") or None)
+            if "error" in updates:
+                row.error_message = (updates.get("error") or None)
+            if "duration_ms" in updates and updates["duration_ms"] is not None:
+                row.duration_ms = int(updates["duration_ms"])
+            if "cancel_requested" in updates and updates["cancel_requested"] is not None:
+                row.cancel_requested = bool(updates["cancel_requested"])
+            if "retry_of" in updates:
+                row.retry_of = updates.get("retry_of") or None
+            if "result" in updates and updates["result"] is not None:
+                row.result_json = json.dumps(updates["result"])
+            if "payload" in updates and updates["payload"] is not None:
+                row.payload_json = json.dumps(updates["payload"])
+        row.updated_at = datetime.utcnow()
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
+def _get_pipeline_job_db(job_id: str) -> Dict[str, Any] | None:
+    try:
+        _ensure_patch_pipeline_job_schema()
+        row = PatchPipelineJob.query.filter_by(job_id=job_id).first()
+        if not row:
+            return None
+        return _pipeline_job_row_to_dict(row, include_result=True)
+    except Exception:
+        return None
+
+
+def _is_pipeline_job_cancel_requested(job_id: str) -> bool:
+    try:
+        _ensure_patch_pipeline_job_schema()
+        row = PatchPipelineJob.query.filter_by(job_id=job_id).first()
+        return bool(row.cancel_requested) if row else False
+    except Exception:
+        return False
+
+
 def _set_pipeline_job(job_id: str, updates: Dict[str, Any]) -> None:
     with _pipeline_jobs_lock:
         existing = _pipeline_jobs.get(job_id, {})
         merged = dict(existing)
         merged.update(updates or {})
         _pipeline_jobs[job_id] = merged
+    _upsert_pipeline_job_db(job_id, updates or {})
 
 
 def _get_pipeline_job(job_id: str) -> Dict[str, Any] | None:
     with _pipeline_jobs_lock:
-        existing = _pipeline_jobs.get(job_id)
-        return dict(existing) if existing else None
+        mem_row = dict(_pipeline_jobs.get(job_id) or {})
+    db_row = _get_pipeline_job_db(job_id)
+    if mem_row and db_row:
+        merged = dict(db_row)
+        merged.update(mem_row)
+        return merged
+    if mem_row:
+        return mem_row
+    return db_row
 
 
 def _prune_pipeline_jobs(max_items: int = 200) -> None:
@@ -593,6 +724,17 @@ def _prune_pipeline_jobs(max_items: int = 200) -> None:
             job_id, _ = ordered.pop(0)
             _pipeline_jobs.pop(job_id, None)
 
+    try:
+        _ensure_patch_pipeline_job_schema()
+        rows = PatchPipelineJob.query.order_by(PatchPipelineJob.updated_at.asc(), PatchPipelineJob.id.asc()).all()
+        if len(rows) <= max_items:
+            return
+        for row in rows[: len(rows) - max_items]:
+            db.session.delete(row)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
 
 def _execute_pipeline(
     *,
@@ -601,6 +743,7 @@ def _execute_pipeline(
     filepath: str,
     trace_id: str,
     progress_hook: Any = None,
+    cancel_check: Any = None,
 ) -> Dict[str, Any]:
     started = time.perf_counter()
     tmp_patch_path = ""
@@ -614,15 +757,51 @@ def _execute_pipeline(
             except Exception:
                 pass
 
+    def _is_canceled() -> bool:
+        if not cancel_check:
+            return False
+        try:
+            return bool(cancel_check())
+        except Exception:
+            return False
+
+    def _run_or_cancel(*, step_index: int, step_total: int, step_id: str, step_name: str, command: List[str] | None, timeout: int, skip_reason: str) -> Dict[str, Any]:
+        if _is_canceled():
+            canceled_step = {
+                "id": step_id,
+                "name": step_name,
+                "status": "CANCELED",
+                "exit_code": 130,
+                "duration_ms": 0,
+                "output_preview": "Canceled by user request",
+                "error_message": "cancel_requested",
+                "command": command or [],
+            }
+            _notify_progress(index=step_index, total=step_total, step=canceled_step)
+            return canceled_step
+
+        step = _run_shell_step(
+            step_id=step_id,
+            name=step_name,
+            command=command,
+            timeout=timeout,
+            skip_reason=skip_reason,
+        )
+        _notify_progress(index=step_index, total=step_total, step=step)
+        return step
+
+    total_steps = 4
     try:
         with tempfile.NamedTemporaryFile("w", suffix=".patch", delete=False, encoding="utf-8") as tmp:
             tmp.write(patch_content)
             tmp_patch_path = tmp.name
 
         checkpatch_script = _find_script(kernel_root, "checkpatch.pl")
-        checkpatch_step = _run_shell_step(
+        checkpatch_step = _run_or_cancel(
+            step_index=1,
+            step_total=total_steps,
             step_id="checkpatch",
-            name="Checkpatch",
+            step_name="Checkpatch",
             command=["perl", checkpatch_script, "--no-tree", tmp_patch_path] if checkpatch_script else None,
             timeout=40,
             skip_reason="checkpatch.pl not found under kernel tree" if not checkpatch_script else "",
@@ -631,49 +810,53 @@ def _execute_pipeline(
         checkpatch_step["warnings_count"] = len(re.findall(r"\bWARNING\b", cp_out))
         checkpatch_step["errors_count"] = len(re.findall(r"\bERROR\b", cp_out))
         steps.append(checkpatch_step)
-        _notify_progress(index=1, total=4, step=checkpatch_step)
-
-        sparse_bin = shutil.which("sparse")
-        sparse_step = _run_shell_step(
-            step_id="sparse",
-            name="Sparse Probe",
-            command=[sparse_bin, "--version"] if sparse_bin else None,
-            timeout=20,
-            skip_reason="sparse not installed in runtime image" if not sparse_bin else "",
-        )
-        steps.append(sparse_step)
-        _notify_progress(index=2, total=4, step=sparse_step)
-
-        spatch_bin = shutil.which("spatch")
-        cocc_step = _run_shell_step(
-            step_id="coccinelle",
-            name="Coccinelle Probe",
-            command=[spatch_bin, "--version"] if spatch_bin else None,
-            timeout=20,
-            skip_reason="spatch (coccinelle) not installed in runtime image" if not spatch_bin else "",
-        )
-        steps.append(cocc_step)
-        _notify_progress(index=3, total=4, step=cocc_step)
-
-        make_bin = shutil.which("make")
-        kernel_makefile = os.path.join(kernel_root, "Makefile")
-        compile_skip = ""
-        compile_cmd = None
-        if not make_bin:
-            compile_skip = "make is not available"
-        elif not os.path.isfile(kernel_makefile):
-            compile_skip = "kernel Makefile not found"
+        if checkpatch_step.get("status") == "CANCELED":
+            pass
         else:
-            compile_cmd = [make_bin, "-C", kernel_root, "-s", "kernelversion"]
-        compile_step = _run_shell_step(
-            step_id="compile_smoke",
-            name="Compile Smoke",
-            command=compile_cmd,
-            timeout=30,
-            skip_reason=compile_skip,
-        )
-        steps.append(compile_step)
-        _notify_progress(index=4, total=4, step=compile_step)
+            sparse_bin = shutil.which("sparse")
+            sparse_step = _run_or_cancel(
+                step_index=2,
+                step_total=total_steps,
+                step_id="sparse",
+                step_name="Sparse Probe",
+                command=[sparse_bin, "--version"] if sparse_bin else None,
+                timeout=20,
+                skip_reason="sparse not installed in runtime image" if not sparse_bin else "",
+            )
+            steps.append(sparse_step)
+            if sparse_step.get("status") != "CANCELED":
+                spatch_bin = shutil.which("spatch")
+                cocc_step = _run_or_cancel(
+                    step_index=3,
+                    step_total=total_steps,
+                    step_id="coccinelle",
+                    step_name="Coccinelle Probe",
+                    command=[spatch_bin, "--version"] if spatch_bin else None,
+                    timeout=20,
+                    skip_reason="spatch (coccinelle) not installed in runtime image" if not spatch_bin else "",
+                )
+                steps.append(cocc_step)
+                if cocc_step.get("status") != "CANCELED":
+                    make_bin = shutil.which("make")
+                    kernel_makefile = os.path.join(kernel_root, "Makefile")
+                    compile_skip = ""
+                    compile_cmd = None
+                    if not make_bin:
+                        compile_skip = "make is not available"
+                    elif not os.path.isfile(kernel_makefile):
+                        compile_skip = "kernel Makefile not found"
+                    else:
+                        compile_cmd = [make_bin, "-C", kernel_root, "-s", "kernelversion"]
+                    compile_step = _run_or_cancel(
+                        step_index=4,
+                        step_total=total_steps,
+                        step_id="compile_smoke",
+                        step_name="Compile Smoke",
+                        command=compile_cmd,
+                        timeout=30,
+                        skip_reason=compile_skip,
+                    )
+                    steps.append(compile_step)
     finally:
         if tmp_patch_path and os.path.exists(tmp_patch_path):
             try:
@@ -693,7 +876,7 @@ def _execute_pipeline(
             session_id=session_id,
             stage=f"pipeline:{item.get('id')}",
             tool=item.get("id", ""),
-            status=(item.get("status") or "FAIL").lower(),
+            status=(item.get("status") or "FAIL").lower().replace("canceled", "cancelled"),
             duration_ms=int(item.get("duration_ms") or 0),
             exit_code=item.get("exit_code"),
             token_input=_estimate_tokens(patch_content) if item.get("id") == "checkpatch" else 0,
@@ -712,7 +895,11 @@ def _execute_pipeline(
         session_id=session_id,
         stage="pipeline",
         tool="pipeline",
-        status=("ok" if summary.get("failed", 0) == 0 else "error"),
+        status=(
+            "cancelled"
+            if summary.get("overall") == "CANCELED"
+            else ("ok" if summary.get("failed", 0) == 0 else "error")
+        ),
         duration_ms=pipeline_duration,
         token_input=_estimate_tokens(patch_content),
         token_output=token_out,
@@ -724,7 +911,7 @@ def _execute_pipeline(
         row.checkpatch_output = steps[0].get("output_preview", "")
         row.updated_at = datetime.utcnow()
         if summary.get("failed", 0) == 0:
-            row.status = "reviewed"
+            row.status = "reviewed" if summary.get("overall") != "CANCELED" else "pending"
         db.session.commit()
 
     log_activity(f"Patch pipeline: {session_id} ({summary.get('overall', 'UNKNOWN')})", "review")
@@ -744,57 +931,66 @@ def _execute_pipeline(
 
 
 def _run_pipeline_job(app_obj: Any, job_id: str, session_id: str, patch_content: str, filepath: str, trace_id: str) -> None:
-    _set_pipeline_job(
-        job_id,
-        {
-            "job_id": job_id,
-            "session_id": session_id,
-            "trace_id": trace_id,
-            "status": "running",
-            "progress": 5,
-            "message": "Pipeline started",
-            "updated_at": datetime.utcnow().isoformat(),
-        },
-    )
-    started = time.perf_counter()
-    try:
-        with app_obj.app_context():
+    with app_obj.app_context():
+        _set_pipeline_job(
+            job_id,
+            {
+                "job_id": job_id,
+                "session_id": session_id,
+                "trace_id": trace_id,
+                "status": "running",
+                "progress": 5,
+                "message": "Pipeline started",
+                "updated_at": datetime.utcnow().isoformat(),
+            },
+        )
+        started = time.perf_counter()
+        try:
             result = _execute_pipeline(
                 session_id=session_id,
                 patch_content=patch_content,
                 filepath=filepath,
                 trace_id=trace_id,
+                cancel_check=lambda: _is_pipeline_job_cancel_requested(job_id),
                 progress_hook=lambda index, total, step: _set_pipeline_job(
                     job_id,
                     {
-                        "status": "running",
+                        "status": "canceling" if _is_pipeline_job_cancel_requested(job_id) else "running",
                         "progress": int((index / max(total, 1)) * 100),
                         "current_step": step.get("name", ""),
                         "updated_at": datetime.utcnow().isoformat(),
                     },
                 ),
             )
-        _set_pipeline_job(
-            job_id,
-            {
-                "status": "completed",
-                "progress": 100,
-                "result": result,
-                "duration_ms": int((time.perf_counter() - started) * 1000),
-                "updated_at": datetime.utcnow().isoformat(),
-            },
-        )
-    except Exception as exc:
-        _set_pipeline_job(
-            job_id,
-            {
-                "status": "failed",
-                "progress": 100,
-                "error": str(exc),
-                "duration_ms": int((time.perf_counter() - started) * 1000),
-                "updated_at": datetime.utcnow().isoformat(),
-            },
-        )
+
+            overall = str((result.get("summary") or {}).get("overall") or "UNKNOWN")
+            terminal_status = "completed"
+            if overall == "FAIL":
+                terminal_status = "failed"
+            elif overall == "CANCELED":
+                terminal_status = "canceled"
+
+            _set_pipeline_job(
+                job_id,
+                {
+                    "status": terminal_status,
+                    "progress": 100,
+                    "result": result,
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
+                    "updated_at": datetime.utcnow().isoformat(),
+                },
+            )
+        except Exception as exc:
+            _set_pipeline_job(
+                job_id,
+                {
+                    "status": "failed",
+                    "progress": 100,
+                    "error": str(exc),
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
+                    "updated_at": datetime.utcnow().isoformat(),
+                },
+            )
 
 
 def _extract_patch_files(patch_content: str) -> List[str]:
@@ -1063,6 +1259,7 @@ def run_checkpatch():
 def run_pipeline():
     _ensure_review_session_schema()
     _ensure_patch_trace_schema()
+    _ensure_patch_pipeline_job_schema()
     payload = request.get_json() or {}
     trace_id = _new_trace_id("pwpipeline")
     session_id = (payload.get("session_id") or f"pipeline-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}").strip()
@@ -1092,6 +1289,7 @@ def run_pipeline():
 def start_pipeline():
     _ensure_review_session_schema()
     _ensure_patch_trace_schema()
+    _ensure_patch_pipeline_job_schema()
     payload = request.get_json() or {}
     session_id = (payload.get("session_id") or f"pipeline-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}").strip()
     patch_content, filepath, patch_error, patch_error_status = _resolve_patch_payload(payload)
@@ -1113,6 +1311,11 @@ def start_pipeline():
         return jsonify({"ok": False, "error": patch_error, "job_id": job_id, "trace_id": trace_id}), patch_error_status
 
     _prune_pipeline_jobs(200)
+    payload_snapshot = {
+        "session_id": session_id,
+        "patch_content": patch_content,
+        "filepath": filepath,
+    }
     _set_pipeline_job(
         job_id,
         {
@@ -1125,6 +1328,7 @@ def start_pipeline():
             "updated_at": datetime.utcnow().isoformat(),
         },
     )
+    _upsert_pipeline_job_db(job_id, {"payload": payload_snapshot}, payload=payload_snapshot)
     app_obj = current_app._get_current_object()
     worker = Thread(
         target=_run_pipeline_job,
@@ -1149,6 +1353,107 @@ def pipeline_status(job_id: str):
     if not row:
         return jsonify({"ok": False, "error": "job not found"}), 404
     return jsonify({"ok": True, **row})
+
+
+@patchwise_bp.post("/api/patchwise/pipeline/cancel/<job_id>")
+def cancel_pipeline(job_id: str):
+    _ensure_patch_pipeline_job_schema()
+    row = _get_pipeline_job(job_id)
+    if not row:
+        return jsonify({"ok": False, "error": "job not found"}), 404
+
+    status = (row.get("status") or "").lower()
+    if status in {"completed", "failed", "canceled"}:
+        _set_pipeline_job(
+            job_id,
+            {
+                "cancel_requested": True,
+                "updated_at": datetime.utcnow().isoformat(),
+            },
+        )
+        return jsonify({"ok": True, "job_id": job_id, "status": status, "message": "Job already terminal"})
+
+    _set_pipeline_job(
+        job_id,
+        {
+            "cancel_requested": True,
+            "status": "canceling" if status in {"queued", "running"} else status,
+            "updated_at": datetime.utcnow().isoformat(),
+        },
+    )
+    return jsonify({"ok": True, "job_id": job_id, "status": "canceling", "message": "Cancel requested"})
+
+
+@patchwise_bp.post("/api/patchwise/pipeline/retry/<job_id>")
+def retry_pipeline(job_id: str):
+    _ensure_patch_pipeline_job_schema()
+    row = PatchPipelineJob.query.filter_by(job_id=job_id).first()
+    if not row:
+        return jsonify({"ok": False, "error": "job not found"}), 404
+
+    payload = _json_load(row.payload_json, {})
+    patch_content = payload.get("patch_content", "")
+    filepath = payload.get("filepath", "")
+    session_id = payload.get("session_id", row.session_id)
+    if not patch_content:
+        return jsonify({"ok": False, "error": "retry payload unavailable"}), 400
+
+    new_job_id = _new_trace_id("pwjob")
+    trace_id = _new_trace_id("pwpipeline")
+    _prune_pipeline_jobs(200)
+    _set_pipeline_job(
+        new_job_id,
+        {
+            "job_id": new_job_id,
+            "session_id": session_id,
+            "trace_id": trace_id,
+            "status": "queued",
+            "progress": 0,
+            "retry_of": job_id,
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+        },
+    )
+    _upsert_pipeline_job_db(
+        new_job_id,
+        {
+            "retry_of": job_id,
+            "payload": payload,
+        },
+        payload=payload,
+    )
+    app_obj = current_app._get_current_object()
+    worker = Thread(
+        target=_run_pipeline_job,
+        args=(app_obj, new_job_id, session_id, patch_content, filepath, trace_id),
+        daemon=True,
+    )
+    worker.start()
+    return jsonify(
+        {
+            "ok": True,
+            "job_id": new_job_id,
+            "retry_of": job_id,
+            "session_id": session_id,
+            "trace_id": trace_id,
+            "status": "queued",
+        }
+    )
+
+
+@patchwise_bp.get("/api/patchwise/pipeline/history")
+def pipeline_history():
+    _ensure_patch_pipeline_job_schema()
+    session_id = (request.args.get("session_id") or "").strip()
+    try:
+        limit = max(1, min(200, int(request.args.get("limit", "30"))))
+    except Exception:
+        limit = 30
+    query = PatchPipelineJob.query.order_by(PatchPipelineJob.updated_at.desc(), PatchPipelineJob.id.desc())
+    if session_id:
+        query = query.filter(PatchPipelineJob.session_id == session_id)
+    rows = query.limit(limit).all()
+    return jsonify({"ok": True, "rows": [_pipeline_job_row_to_dict(row, include_result=False) for row in rows]})
 
 
 @patchwise_bp.post("/api/patchwise/autofix/preview")

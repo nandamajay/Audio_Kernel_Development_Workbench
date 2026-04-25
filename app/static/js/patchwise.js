@@ -16,6 +16,7 @@ window.AKDWPatchwise = (function () {
   let lastAutofixPreview = null;
   let lastAutofixBackupPath = "";
   let lastTraceId = "";
+  let activePipelineJobId = "";
 
   function fmtSize(bytes) {
     if (bytes < 1024) return bytes + " B";
@@ -108,6 +109,7 @@ window.AKDWPatchwise = (function () {
     const ready = hasPatchContent();
     const reviewBtn = document.getElementById("runReviewBtn");
     const pipelineBtn = document.getElementById("runPipelineBtn");
+    const cancelPipelineBtn = document.getElementById("cancelPipelineBtn");
     const checkBtn = document.getElementById("runCheckpatchBtn");
     const autofixBtn = document.getElementById("previewAutofixBtn");
     const exportBtn = document.getElementById("exportBtn");
@@ -122,6 +124,11 @@ window.AKDWPatchwise = (function () {
     });
 
     reviewBtn.classList.toggle("ready", ready && !hasResults);
+    if (cancelPipelineBtn) {
+      const active = !!activePipelineJobId;
+      cancelPipelineBtn.disabled = !active;
+      cancelPipelineBtn.classList.toggle("btn-disabled", !active);
+    }
     if (applyAutofixBtn) {
       const canApply = ready && !!(lastAutofixPreview && lastAutofixPreview.has_changes);
       applyAutofixBtn.disabled = !canApply;
@@ -178,6 +185,7 @@ window.AKDWPatchwise = (function () {
       autofixSelectedFixIds = [];
       lastAutofixPreview = null;
       lastAutofixBackupPath = "";
+      activePipelineJobId = "";
       onboarding.style.display = "grid";
       hint.style.display = "none";
       readyBanner.style.display = "none";
@@ -312,6 +320,7 @@ window.AKDWPatchwise = (function () {
         autofixSelectedFixIds = [];
         lastAutofixPreview = null;
         lastAutofixBackupPath = "";
+        activePipelineJobId = "";
         renderFiles();
       };
       reader.readAsText(file);
@@ -446,6 +455,7 @@ window.AKDWPatchwise = (function () {
         setActionState();
         loadTraceList();
         loadAnalytics();
+        loadPipelineHistory();
       });
       root.appendChild(entry);
     });
@@ -695,6 +705,166 @@ window.AKDWPatchwise = (function () {
     ].join("");
   }
 
+  function renderPipelineHistory(rows) {
+    const box = document.getElementById("pipelineHistoryList");
+    if (!box) return;
+    box.innerHTML = "";
+    if (!rows || !rows.length) {
+      box.innerHTML = '<div class="small-muted">No pipeline jobs yet.</div>';
+      return;
+    }
+    rows.slice(0, 8).forEach(function (row) {
+      const item = document.createElement("div");
+      item.className = "pipeline-history-item";
+      const left = document.createElement("div");
+      left.innerHTML = "<div><strong>" + escapeHtml((row.status || "unknown").toUpperCase()) + "</strong></div>" +
+        "<div>job=" + escapeHtml(row.job_id || "") + " · " + fmtMs(row.duration_ms || 0) + "</div>";
+      const right = document.createElement("div");
+      right.style.display = "flex";
+      right.style.gap = "6px";
+
+      const status = String(row.status || "").toLowerCase();
+      if (status === "running" || status === "queued" || status === "canceling") {
+        const cancelBtn = document.createElement("button");
+        cancelBtn.type = "button";
+        cancelBtn.className = "btn-danger btn-xs";
+        cancelBtn.textContent = "Cancel";
+        cancelBtn.addEventListener("click", function () {
+          activePipelineJobId = row.job_id || "";
+          cancelPipelineJob();
+        });
+        right.appendChild(cancelBtn);
+      } else if (status === "failed" || status === "canceled") {
+        const retryBtn = document.createElement("button");
+        retryBtn.type = "button";
+        retryBtn.className = "btn-secondary btn-xs";
+        retryBtn.textContent = "Retry";
+        retryBtn.addEventListener("click", function () {
+          retryPipelineJob(row.job_id || "");
+        });
+        right.appendChild(retryBtn);
+      }
+
+      item.appendChild(left);
+      item.appendChild(right);
+      box.appendChild(item);
+    });
+  }
+
+  async function loadPipelineHistory() {
+    const box = document.getElementById("pipelineHistoryList");
+    if (!box) return;
+    try {
+      const res = await fetch("/api/patchwise/pipeline/history?session_id=" + encodeURIComponent(sessionId) + "&limit=20");
+      const data = await res.json();
+      if (!data.ok) {
+        box.innerHTML = '<div class="small-muted">Pipeline history unavailable.</div>';
+        return;
+      }
+      renderPipelineHistory(data.rows || []);
+    } catch (err) {
+      box.innerHTML = '<div class="small-muted">Pipeline history load failed.</div>';
+    }
+  }
+
+  async function cancelPipelineJob() {
+    if (!activePipelineJobId) return;
+    const res = await fetch("/api/patchwise/pipeline/cancel/" + encodeURIComponent(activePipelineJobId), {
+      method: "POST",
+    });
+    const data = await res.json();
+    const summaryBox = document.getElementById("pipelineSummary");
+    if (!data.ok) {
+      summaryBox.textContent = data.error || "Unable to cancel pipeline";
+      return;
+    }
+    summaryBox.textContent = "Cancel requested for job " + activePipelineJobId;
+    await loadPipelineHistory();
+    setActionState();
+  }
+
+  async function retryPipelineJob(jobId) {
+    if (!jobId) return;
+    const summaryBox = document.getElementById("pipelineSummary");
+    summaryBox.textContent = "Retrying job " + jobId + "...";
+    reviewStarted = true;
+    exportedReport = false;
+    setStepState(true, true, false, false);
+    setReviewRunning(true);
+    startReviewProgress();
+    try {
+      const res = await fetch("/api/patchwise/pipeline/retry/" + encodeURIComponent(jobId), { method: "POST" });
+      const data = await res.json();
+      if (!data.ok) {
+        summaryBox.textContent = data.error || "Retry failed";
+        stopReviewProgress(false);
+        return;
+      }
+      activePipelineJobId = data.job_id || "";
+      setActionState();
+      await loadPipelineHistory();
+      await runPipelineStatusLoop(activePipelineJobId, data.trace_id || "");
+      stopReviewProgress(true);
+    } catch (err) {
+      summaryBox.textContent = "Retry failed";
+      stopReviewProgress(false);
+      await loadPipelineHistory();
+    } finally {
+      setReviewRunning(false);
+      setActionState();
+    }
+  }
+
+  async function runPipelineStatusLoop(jobId, traceIdHint) {
+    const summaryBox = document.getElementById("pipelineSummary");
+    let finalPayload = null;
+    const startedAt = Date.now();
+    while ((Date.now() - startedAt) < 240000) {
+      await delay(1000);
+      const statusRes = await fetch("/api/patchwise/pipeline/status/" + encodeURIComponent(jobId));
+      const statusData = await statusRes.json();
+      if (!statusData.ok) {
+        throw new Error(statusData.error || "Pipeline job status failed");
+      }
+      renderPipelineJobProgress(statusData);
+      const status = String(statusData.status || "").toLowerCase();
+      if (status === "completed") {
+        finalPayload = statusData.result || {};
+        activePipelineJobId = "";
+        break;
+      }
+      if (status === "failed" || status === "canceled") {
+        if (statusData.trace_id) {
+          lastTraceId = statusData.trace_id;
+        }
+        await loadTraceList(lastTraceId);
+        await loadAnalytics();
+        await loadPipelineHistory();
+        activePipelineJobId = "";
+        throw new Error(statusData.error || ("Pipeline " + status));
+      }
+      setActionState();
+    }
+
+    if (!finalPayload) {
+      activePipelineJobId = "";
+      throw new Error("Pipeline job timed out");
+    }
+
+    lastTraceId = finalPayload.trace_id || traceIdHint || "";
+    renderPipelineResult(finalPayload);
+    hasResults = true;
+    setStepState(true, true, true, exportedReport);
+    setActionState();
+    const findings = finalPayload.findings || [];
+    document.getElementById("checkpatchOutput").textContent =
+      "Pipeline findings: " + findings.length + (findings.length ? ("\n" + findings.map(function (f) { return "[" + f.severity + "] " + f.message; }).join("\n")) : "");
+    await loadTraceList(lastTraceId);
+    await loadAnalytics();
+    await loadPipelineHistory();
+    summaryBox.style.display = "block";
+  }
+
   async function loadTraceList(optionalTraceId) {
     const traceList = document.getElementById("traceList");
     const traceSummary = document.getElementById("traceSummary");
@@ -858,46 +1028,19 @@ window.AKDWPatchwise = (function () {
         return;
       }
       const jobId = data.job_id || "";
+      activePipelineJobId = jobId;
       lastTraceId = data.trace_id || "";
       renderPipelineJobProgress(data);
-
-      let finalPayload = null;
-      const startedAt = Date.now();
-      while ((Date.now() - startedAt) < 240000) {
-        await delay(1000);
-        const statusRes = await fetch("/api/patchwise/pipeline/status/" + encodeURIComponent(jobId));
-        const statusData = await statusRes.json();
-        if (!statusData.ok) {
-          throw new Error(statusData.error || "Pipeline job status failed");
-        }
-        renderPipelineJobProgress(statusData);
-        if (statusData.status === "completed") {
-          finalPayload = statusData.result || {};
-          break;
-        }
-        if (statusData.status === "failed") {
-          throw new Error(statusData.error || "Pipeline failed");
-        }
-      }
-
-      if (!finalPayload) {
-        throw new Error("Pipeline job timed out");
-      }
-
-      lastTraceId = finalPayload.trace_id || lastTraceId;
-      renderPipelineResult(finalPayload);
-      hasResults = true;
-      setStepState(true, true, true, exportedReport);
       setActionState();
-      const findings = finalPayload.findings || [];
-      document.getElementById("checkpatchOutput").textContent =
-        "Pipeline findings: " + findings.length + (findings.length ? ("\n" + findings.map(function (f) { return "[" + f.severity + "] " + f.message; }).join("\n")) : "");
-      await loadTraceList(lastTraceId);
-      await loadAnalytics();
+      await loadPipelineHistory();
+      await runPipelineStatusLoop(jobId, lastTraceId);
       stopReviewProgress(true);
     } catch (err) {
       summaryBox.textContent = "Pipeline failed: " + (err && err.message ? err.message : "unknown error");
       stopReviewProgress(false);
+      activePipelineJobId = "";
+      await loadPipelineHistory();
+      setActionState();
     } finally {
       setReviewRunning(false);
     }
@@ -1169,6 +1312,7 @@ window.AKDWPatchwise = (function () {
 
     document.getElementById("runReviewBtn").addEventListener("click", runReview);
     document.getElementById("runPipelineBtn").addEventListener("click", runPipeline);
+    document.getElementById("cancelPipelineBtn").addEventListener("click", cancelPipelineJob);
     document.getElementById("runCheckpatchBtn").addEventListener("click", runCheckpatch);
     document.getElementById("previewAutofixBtn").addEventListener("click", previewAutofix);
     document.getElementById("applyAutofixBtn").addEventListener("click", applyAutofix);
@@ -1180,6 +1324,7 @@ window.AKDWPatchwise = (function () {
     document.getElementById("hintCheckpatchBtn").addEventListener("click", runCheckpatch);
     document.getElementById("pwAskBtn").addEventListener("click", askReviewer);
     document.getElementById("refreshAnalyticsBtn").addEventListener("click", loadAnalytics);
+    document.getElementById("refreshPipelineHistoryBtn").addEventListener("click", loadPipelineHistory);
     document.getElementById("patchContent").addEventListener("input", function () {
       if (this.value.trim()) {
         setStepState(true, reviewStarted, hasResults, exportedReport);
@@ -1196,6 +1341,7 @@ window.AKDWPatchwise = (function () {
     loadSessionList();
     loadTraceList();
     loadAnalytics();
+    loadPipelineHistory();
   }
 
   return { init: init };
