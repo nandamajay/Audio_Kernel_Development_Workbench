@@ -10,6 +10,24 @@ AKDW is a Flask-based kernel development cockpit for patch review, triage, conve
 - Diagrams: [`docs/diagrams/akdw-overview.mmd`](./docs/diagrams/akdw-overview.mmd)
 - Screenshots: [`docs/screenshots/README.md`](./docs/screenshots/README.md)
 
+## UI Preview
+
+### Dashboard
+
+![AKDW Dashboard](./docs/screenshots/dashboard-glassmorphism-2026-04-25.png)
+
+### Code Editor (Terminal-IDE)
+
+![AKDW Editor](./docs/screenshots/editor-terminal-ide-2026-04-25.png)
+
+### QGenie Agent
+
+![AKDW Agent](./docs/screenshots/agent-thinking-stream-2026-04-25.png)
+
+### Upstream Tracker
+
+![AKDW Upstream Tracker](./docs/screenshots/upstream-tracker-cards-2026-04-25.png)
+
 ## What You Get
 
 - Terminal-IDE style `Code Editor` with Monaco + xterm + Agent mode

@@ -1,15 +1,53 @@
 # AKDW Screenshot Gallery
 
-Use this folder to store release-quality UI captures for reports and README embeds.
+Release-quality UI captures for AKDW modules.
+
+Capture date: `2026-04-25`
 
 ## Recommended Screenshots
 
-- `dashboard-glassmorphism.png`
-- `editor-terminal-ide.png`
-- `agent-thinking-stream.png`
-- `patchwise-guided-review.png`
-- `upstream-tracker-cards.png`
-- `target-manager-grid-terminal.png`
+- `dashboard-glassmorphism-2026-04-25.png`
+- `editor-terminal-ide-2026-04-25.png`
+- `agent-thinking-stream-2026-04-25.png`
+- `patchwise-guided-review-2026-04-25.png`
+- `upstream-tracker-cards-2026-04-25.png`
+- `target-manager-grid-terminal-2026-04-25.png`
+- `triage-onboarding-2026-04-25.png`
+- `settings-config-2026-04-25.png`
+
+## Preview
+
+### Dashboard
+
+![Dashboard](./dashboard-glassmorphism-2026-04-25.png)
+
+### Code Editor (Terminal-IDE)
+
+![Editor Terminal IDE](./editor-terminal-ide-2026-04-25.png)
+
+### QGenie Agent
+
+![Agent Thinking Stream](./agent-thinking-stream-2026-04-25.png)
+
+### Patch Workshop
+
+![Patchwise Guided Review](./patchwise-guided-review-2026-04-25.png)
+
+### Upstream Tracker
+
+![Upstream Tracker](./upstream-tracker-cards-2026-04-25.png)
+
+### Target Manager
+
+![Target Manager](./target-manager-grid-terminal-2026-04-25.png)
+
+### Triage
+
+![Triage Onboarding](./triage-onboarding-2026-04-25.png)
+
+### Settings
+
+![Settings](./settings-config-2026-04-25.png)
 
 ## Capture Guidance
 
@@ -30,6 +68,6 @@ Examples:
 ## Optional README Embeds
 
 ```markdown
-![Dashboard](./screenshots/dashboard-glassmorphism.png)
-![Editor](./screenshots/editor-terminal-ide.png)
+![Dashboard](./screenshots/dashboard-glassmorphism-2026-04-25.png)
+![Editor](./screenshots/editor-terminal-ide-2026-04-25.png)
 ```
