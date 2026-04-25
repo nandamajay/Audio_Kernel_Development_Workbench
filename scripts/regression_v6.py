@@ -128,7 +128,21 @@ def run_suite(base_url: str) -> List[CheckResult]:
     return results
 
 
-def write_reports(results: List[CheckResult], out_json: Path, out_md: Path, base_url: str) -> None:
+def run_observability_extras(base_url: str) -> List[CheckResult]:
+    extras: List[CheckResult] = []
+
+    s, body, parsed = request_json(base_url, "/api/agent/stream/metrics", method="GET")
+    ok = s == 200 and isinstance(parsed, dict) and parsed.get("ok") is True and isinstance(parsed.get("metrics"), dict)
+    extras.append(CheckResult(name="EXTRA_STREAM_METRICS", ok=ok, note=f"GET /api/agent/stream/metrics => {s}"))
+
+    s, body, parsed = request_json(base_url, "/api/terminal/audit?limit=1", method="GET")
+    ok = s == 200 and isinstance(parsed, dict) and parsed.get("ok") is True and isinstance(parsed.get("rows"), list)
+    extras.append(CheckResult(name="EXTRA_TERMINAL_AUDIT", ok=ok, note=f"GET /api/terminal/audit?limit=1 => {s}"))
+
+    return extras
+
+
+def write_reports(results: List[CheckResult], extras: List[CheckResult], out_json: Path, out_md: Path, base_url: str) -> None:
     passed = sum(1 for item in results if item.ok)
     payload = {
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
@@ -140,6 +154,10 @@ def write_reports(results: List[CheckResult], out_json: Path, out_md: Path, base
         "checks": [
             {"name": item.name, "status": "PASS" if item.ok else "FAIL", "note": item.note}
             for item in results
+        ],
+        "extras": [
+            {"name": item.name, "status": "PASS" if item.ok else "FAIL", "note": item.note}
+            for item in extras
         ],
     }
     out_json.parent.mkdir(parents=True, exist_ok=True)
@@ -160,6 +178,11 @@ def write_reports(results: List[CheckResult], out_json: Path, out_md: Path, base
     for item in results:
         status = "PASS" if item.ok else "FAIL"
         lines.append(f"| {item.name} | {status} | {item.note} |")
+    if extras:
+        lines.extend(["", "## Observability Extras (non-gating)", "", "| Check | Status | Note |", "|---|---|---|"])
+        for item in extras:
+            status = "PASS" if item.ok else "FAIL"
+            lines.append(f"| {item.name} | {status} | {item.note} |")
     out_md.parent.mkdir(parents=True, exist_ok=True)
     out_md.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -172,10 +195,13 @@ def main() -> int:
     args = parser.parse_args()
 
     results = run_suite(args.base_url)
+    extras = run_observability_extras(args.base_url)
     for item in results:
         print(f"{item.name}: {'PASS' if item.ok else 'FAIL'} - {item.note}")
+    for item in extras:
+        print(f"{item.name}: {'PASS' if item.ok else 'FAIL'} - {item.note}")
 
-    write_reports(results, Path(args.out_json), Path(args.out_md), args.base_url)
+    write_reports(results, extras, Path(args.out_json), Path(args.out_md), args.base_url)
     passed = sum(1 for item in results if item.ok)
     print(f"SUMMARY: {passed}/{len(results)} checks passed")
     return 0 if passed >= 13 else 1
@@ -183,4 +209,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

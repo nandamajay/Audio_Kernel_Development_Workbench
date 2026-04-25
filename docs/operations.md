@@ -16,6 +16,8 @@ docker compose up -d --build akdw
 curl -s http://localhost:5001/health
 curl -s http://localhost:5001/api/dashboard/stats
 curl -s http://localhost:5001/agent/ | head -n 20
+curl -s http://localhost:5001/api/agent/stream/metrics
+curl -s http://localhost:5001/api/terminal/audit?limit=5
 ```
 
 ## Route Verification Set
@@ -45,6 +47,15 @@ GIT_SSH_COMMAND='ssh -x' git push origin --tags
   - section-level PASS/FAIL
   - regression score
   - enhancement recommendations
+
+## Phase 7 Observability Endpoints
+
+- Stream metrics: `GET /api/agent/stream/metrics`
+  - `active_streams`, `reconnects_total`, `stream_errors`
+  - `streams_started/completed`, `avg_duration_sec`, `max_duration_sec`
+- Terminal command audit: `GET /api/terminal/audit`
+  - filter by `session_id`
+  - includes `command`, `exit_code`, `allowed`, `blocked_reason`
 
 ## Troubleshooting
 
