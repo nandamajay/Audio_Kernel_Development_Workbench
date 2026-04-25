@@ -125,3 +125,29 @@ class ActivityLog(db.Model):
     event = db.Column(db.String(500), nullable=False)
     event_type = db.Column(db.String(50), nullable=False, default="agent")
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class Target(db.Model):
+    __tablename__ = "targets"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), nullable=False)
+    serial = db.Column(db.String(255), nullable=False, unique=True, index=True)
+    platform = db.Column(db.String(128), nullable=True)
+    status = db.Column(db.String(32), nullable=False, default="disconnected")
+    last_seen = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ValidationRun(db.Model):
+    __tablename__ = "validation_runs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    target_id = db.Column(db.Integer, db.ForeignKey("targets.id"), nullable=False, index=True)
+    session_id = db.Column(db.String(64), nullable=False, index=True)
+    nl_command = db.Column(db.Text, nullable=False)
+    commands_executed = db.Column(db.Text, nullable=False, default="[]")
+    raw_output = db.Column(db.Text, nullable=True)
+    llm_summary = db.Column(db.Text, nullable=True)
+    result = db.Column(db.String(16), nullable=False, default="ERROR")
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)

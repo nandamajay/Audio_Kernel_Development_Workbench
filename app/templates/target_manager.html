@@ -1,0 +1,1016 @@
+{% extends "base.html" %}
+{% block title %}Target Manager — AKDW{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css"/>
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+<style>
+  .tm-page {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    padding: 24px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  .glass-card {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.10);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-radius: 16px;
+    padding: 24px;
+  }
+
+  .tm-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .tm-header h1 {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: #e2e8f0;
+    margin: 0;
+  }
+
+  .tm-subtitle {
+    font-size: 0.85rem;
+    color: rgba(255,255,255,0.45);
+    display: block;
+    margin-top: 4px;
+  }
+
+  .tm-header-right {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .tm-connect-panel h3 {
+    font-size: 1.1rem;
+    color: #a78bfa;
+    margin-bottom: 20px;
+  }
+
+  .connect-form {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 16px;
+    align-items: start;
+  }
+
+  .connect-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    grid-column: 1 / -1;
+    margin-top: 8px;
+  }
+
+  .connect-status {
+    grid-column: 1 / -1;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 500;
+  }
+
+  .status-success {
+    background: rgba(34,197,94,0.15);
+    border: 1px solid rgba(34,197,94,0.3);
+    color: #4ade80;
+  }
+
+  .status-error {
+    background: rgba(239,68,68,0.15);
+    border: 1px solid rgba(239,68,68,0.3);
+    color: #f87171;
+  }
+
+  .status-info {
+    background: rgba(99,102,241,0.15);
+    border: 1px solid rgba(99,102,241,0.3);
+    color: #a5b4fc;
+  }
+
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+
+  .form-group label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: rgba(255,255,255,0.6);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .required { color: #f87171; }
+
+  .form-hint {
+    font-size: 0.75rem;
+    color: rgba(255,255,255,0.3);
+  }
+
+  .tm-input {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: #e2e8f0;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.2s;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .tm-input:focus {
+    border-color: #7c3aed;
+    background: rgba(124,58,237,0.08);
+  }
+
+  .tm-input-sm { padding: 6px 10px; font-size: 0.8rem; }
+
+  .tm-select {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: #e2e8f0;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    outline: none;
+    cursor: pointer;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .tm-select-sm { padding: 6px 10px; font-size: 0.8rem; }
+
+  .radio-group { display: flex; gap: 16px; flex-wrap: wrap; }
+
+  .radio-opt {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+  }
+
+  .targets-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+    margin-top: 16px;
+  }
+
+  .target-card {
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+  }
+
+  .target-card:hover {
+    border-color: rgba(124,58,237,0.4);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 32px rgba(124,58,237,0.15);
+  }
+
+  .target-card-active {
+    border-color: #7c3aed !important;
+    box-shadow: 0 0 0 2px rgba(124,58,237,0.3), 0 8px 32px rgba(124,58,237,0.2) !important;
+  }
+
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+
+  .card-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 1rem;
+    color: #e2e8f0;
+  }
+
+  .card-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    color: rgba(255,255,255,0.6);
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  .card-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 16px;
+    padding: 12px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 8px;
+  }
+
+  .meta-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .meta-label {
+    font-size: 0.75rem;
+    color: rgba(255,255,255,0.4);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .meta-value {
+    font-size: 0.82rem;
+    color: rgba(255,255,255,0.75);
+    overflow-wrap: anywhere;
+    text-align: right;
+  }
+
+  .card-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .tm-empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: rgba(255,255,255,0.4);
+  }
+
+  .empty-icon { font-size: 3rem; margin-bottom: 16px; }
+
+  .tm-empty-state p {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: rgba(255,255,255,0.6);
+    margin-bottom: 8px;
+  }
+
+  .tm-terminal-panel { padding: 0; overflow: hidden; }
+
+  .terminal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: rgba(255,255,255,0.04);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: rgba(255,255,255,0.7);
+  }
+
+  .terminal-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .terminal-badge {
+    background: rgba(124,58,237,0.2);
+    border: 1px solid rgba(124,58,237,0.4);
+    color: #a78bfa;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+  }
+
+  .terminal-footer {
+    padding: 12px 16px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .status-badge {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+
+  .status-running {
+    background: rgba(245,158,11,0.15);
+    color: #fbbf24;
+  }
+
+  .status-pass {
+    background: rgba(34,197,94,0.15);
+    color: #4ade80;
+  }
+
+  .status-fail {
+    background: rgba(239,68,68,0.15);
+    color: #f87171;
+  }
+
+  .validation-summary {
+    margin-top: 10px;
+    padding: 12px;
+    border: 1px solid rgba(255,255,255,0.10);
+    background: rgba(255,255,255,0.03);
+    border-radius: 10px;
+    font-size: 0.85rem;
+    color: rgba(255,255,255,0.75);
+  }
+
+  .validation-summary pre {
+    margin-top: 10px;
+    padding: 10px;
+    border-radius: 8px;
+    background: rgba(0,0,0,0.35);
+    white-space: pre-wrap;
+  }
+
+  .history-filters {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .history-table-wrapper { overflow-x: auto; margin-top: 16px; }
+
+  .tm-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+
+  .tm-table th {
+    text-align: left;
+    padding: 10px 14px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: rgba(255,255,255,0.4);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+
+  .tm-table td {
+    padding: 12px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    color: rgba(255,255,255,0.75);
+  }
+
+  .history-row { cursor: pointer; transition: background 0.15s; }
+
+  .history-row:hover { background: rgba(124,58,237,0.08); }
+
+  .result-badge {
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 700;
+  }
+
+  .result-pass {
+    background: rgba(34,197,94,0.15);
+    color: #4ade80;
+  }
+
+  .result-fail {
+    background: rgba(239,68,68,0.15);
+    color: #f87171;
+  }
+
+  .result-error {
+    background: rgba(245,158,11,0.15);
+    color: #fbbf24;
+  }
+
+  .empty-row td {
+    text-align: center;
+    color: rgba(255,255,255,0.3);
+    padding: 32px;
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, #7c3aed, #4f46e5);
+    color: #fff;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(124,58,237,0.4);
+  }
+
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-lg { padding: 12px 28px; font-size: 1rem; }
+  .btn-sm { padding: 6px 12px; font-size: 0.8rem; }
+  .btn-xs { padding: 3px 8px; font-size: 0.75rem; }
+
+  .btn-secondary {
+    background: rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.75);
+    border: 1px solid rgba(255,255,255,0.12);
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-secondary:hover { background: rgba(255,255,255,0.12); }
+
+  .btn-ghost {
+    background: transparent;
+    color: rgba(255,255,255,0.5);
+    border: 1px solid rgba(255,255,255,0.08);
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-ghost:hover {
+    background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.8);
+  }
+
+  .btn-danger {
+    background: rgba(239,68,68,0.12);
+    color: #f87171;
+    border: 1px solid rgba(239,68,68,0.2);
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-danger:hover { background: rgba(239,68,68,0.2); }
+
+  .badge {
+    background: rgba(124,58,237,0.2);
+    color: #a78bfa;
+    border: 1px solid rgba(124,58,237,0.3);
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    margin-left: 8px;
+  }
+
+  .badge-neutral {
+    background: rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.6);
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.75rem;
+  }
+
+  .hidden { display: none !important; }
+  .mt-2 { margin-top: 12px; }
+
+  .spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    vertical-align: middle;
+    margin-left: 6px;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .tm-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  .tm-section-header h2 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #e2e8f0;
+    margin: 0;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="tm-page">
+  <div class="tm-header glass-card">
+    <div class="tm-header-left">
+      <h1>🖥️ Target Manager</h1>
+      <span class="tm-subtitle">ADB / Fastboot device management &amp; validation</span>
+    </div>
+    <div class="tm-header-right">
+      <button class="btn-primary" id="btnShowConnect" onclick="toggleConnectPanel()">
+        ＋ Connect New Target
+      </button>
+      <button class="btn-secondary" onclick="refreshAllTargets()">
+        🔄 Refresh All
+      </button>
+    </div>
+  </div>
+
+  <div class="tm-connect-panel glass-card" id="connectPanel">
+    <h3>🔌 Connect a Target Device</h3>
+    <div class="connect-form">
+      <div class="form-group">
+        <label>ADB Serial / IP:Port <span class="required">*</span></label>
+        <input type="text" id="inputSerial" placeholder="e.g. 192.168.1.100:5555 or ABC1234" class="tm-input" autocomplete="off"/>
+        <span class="form-hint">
+          Run <code>adb devices</code> to find your serial
+        </span>
+      </div>
+
+      <div class="form-group">
+        <label>Platform / Board</label>
+        <select id="inputPlatform" class="tm-select">
+          <option value="rb3gen2">Kodiak RB3Gen2</option>
+          <option value="adsp">ADSP Board</option>
+          <option value="qrd">QRD</option>
+          <option value="mtp">MTP</option>
+          <option value="custom">Custom</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Nickname (optional)</label>
+        <input type="text" id="inputNickname" placeholder="e.g. Lab-Board-01" class="tm-input"/>
+      </div>
+
+      <div class="form-group">
+        <label>Connection Type</label>
+        <div class="radio-group">
+          <label class="radio-opt">
+            <input type="radio" name="connType" value="adb" checked/> ADB USB
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="connType" value="adb_tcp"/> ADB TCP/IP
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="connType" value="fastboot"/> Fastboot
+          </label>
+        </div>
+      </div>
+
+      <div class="connect-actions">
+        <button class="btn-primary btn-lg" id="btnConnect" onclick="connectTarget()">
+          <span id="connectBtnText">🔌 Connect Target</span>
+          <span id="connectSpinner" class="spinner hidden"></span>
+        </button>
+        <button class="btn-ghost" onclick="toggleConnectPanel()">
+          Cancel
+        </button>
+      </div>
+
+      <div id="connectStatus" class="connect-status hidden"></div>
+    </div>
+  </div>
+
+  <div class="tm-section">
+    <div class="tm-section-header">
+      <h2>Connected Targets
+        <span class="badge" id="targetCount">0</span>
+      </h2>
+    </div>
+
+    <div class="tm-empty-state" id="emptyState">
+      <div class="empty-icon">📱</div>
+      <p>No targets connected yet</p>
+      <span>Click <strong>"Connect New Target"</strong> above to add your first device</span>
+      <button class="btn-primary mt-2" onclick="toggleConnectPanel()">
+        ＋ Connect First Target
+      </button>
+    </div>
+
+    <div class="targets-grid" id="targetsGrid"></div>
+  </div>
+
+  <div class="tm-terminal-panel glass-card hidden" id="terminalPanel">
+    <div class="terminal-header">
+      <span>⚡ Live Validation Terminal</span>
+      <div class="terminal-controls">
+        <span id="terminalTargetLabel" class="terminal-badge"></span>
+        <button class="btn-ghost btn-xs" onclick="clearTerminal()">Clear</button>
+        <button class="btn-ghost btn-xs" onclick="hideTerminal()">✕</button>
+      </div>
+    </div>
+    <div id="xtermContainer" style="height:350px; background:#000; border-radius:0 0 12px 12px; padding:8px;"></div>
+    <div class="terminal-footer">
+      <span id="validationStatus" class="status-badge"></span>
+      <div id="validationSummary" class="validation-summary hidden"></div>
+    </div>
+  </div>
+
+  <div class="tm-section hidden" id="historyPanel">
+    <div class="tm-section-header">
+      <h2>📋 Validation History</h2>
+      <div class="history-filters">
+        <input type="text" id="filterSearch" placeholder="Search runs..." class="tm-input tm-input-sm" oninput="filterHistory()"/>
+        <select id="filterResult" class="tm-select tm-select-sm" onchange="filterHistory()">
+          <option value="">All Results</option>
+          <option value="PASS">✅ PASS</option>
+          <option value="FAIL">❌ FAIL</option>
+          <option value="ERROR">⚠️ ERROR</option>
+        </select>
+        <input type="date" id="filterDateFrom" class="tm-input tm-input-sm" onchange="filterHistory()"/>
+        <input type="date" id="filterDateTo" class="tm-input tm-input-sm" onchange="filterHistory()"/>
+        <button class="btn-ghost btn-sm" onclick="clearFilters()">Clear</button>
+      </div>
+    </div>
+    <div class="history-table-wrapper">
+      <table class="tm-table" id="historyTable">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Target</th>
+            <th>Use Case</th>
+            <th>Result</th>
+            <th>Duration</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="historyTableBody">
+          <tr class="empty-row">
+            <td colspan="6">No validation runs yet</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let targets = [];
+  let activeTargetId = null;
+  let term = null;
+  let connectPanelVisible = true;
+
+  function esc(text) {
+    return String(text || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    loadTargets();
+    initXterm();
+  });
+
+  function toggleConnectPanel() {
+    const panel = document.getElementById('connectPanel');
+    connectPanelVisible = !connectPanelVisible;
+    panel.classList.toggle('hidden', !connectPanelVisible);
+    if (connectPanelVisible) {
+      document.getElementById('inputSerial').focus();
+    }
+  }
+
+  async function loadTargets() {
+    try {
+      const res = await fetch('/target-manager/api/targets');
+      const data = await res.json();
+      targets = data.targets || [];
+      renderTargetsGrid();
+      updateTargetCount();
+    } catch (e) {
+      showConnectStatus('error', '⚠️ Failed to load targets: ' + e.message);
+    }
+  }
+
+  function renderTargetsGrid() {
+    const grid = document.getElementById('targetsGrid');
+    const empty = document.getElementById('emptyState');
+    const connectPanel = document.getElementById('connectPanel');
+
+    if (targets.length === 0) {
+      empty.classList.remove('hidden');
+      grid.innerHTML = '';
+      connectPanel.classList.remove('hidden');
+      connectPanelVisible = true;
+      return;
+    }
+
+    empty.classList.add('hidden');
+    connectPanel.classList.add('hidden');
+    connectPanelVisible = false;
+
+    grid.innerHTML = targets.map(t => renderTargetCard(t)).join('');
+  }
+
+  function renderTargetCard(t) {
+    const statusColor = {
+      'online': '#22c55e',
+      'offline': '#ef4444',
+      'connecting': '#f59e0b',
+      'unknown': '#6b7280'
+    }[t.status] || '#6b7280';
+
+    return `
+    <div class="target-card glass-card ${t.id == activeTargetId ? 'target-card-active' : ''}"
+         id="card-${t.id}"
+         onclick="selectTarget('${t.id}')">
+      <div class="card-header">
+        <div class="card-title">
+          <span class="platform-icon">📱</span>
+          <span>${esc(t.nickname || t.serial)}</span>
+        </div>
+        <div class="card-status">
+          <span class="status-dot" style="background:${statusColor}"></span>
+          <span class="status-text">${esc(t.status || 'unknown')}</span>
+        </div>
+      </div>
+
+      <div class="card-meta">
+        <div class="meta-row">
+          <span class="meta-label">Serial</span>
+          <code class="meta-value">${esc(t.serial)}</code>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Platform</span>
+          <span class="meta-value">${esc(t.platform || '—')}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Last Run</span>
+          <span class="meta-value">${t.last_run_at ? new Date(t.last_run_at).toLocaleString() : 'Never'}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Total Runs</span>
+          <span class="meta-value badge-neutral">${t.run_count || 0}</span>
+        </div>
+      </div>
+
+      <div class="card-actions">
+        <button class="btn-primary btn-sm" onclick="event.stopPropagation(); startValidation('${t.id}')">▶ Validate</button>
+        <button class="btn-secondary btn-sm" onclick="event.stopPropagation(); loadHistory('${t.id}')">📋 History</button>
+        <button class="btn-ghost btn-sm" onclick="event.stopPropagation(); refreshTarget('${t.id}')">🔄</button>
+        <button class="btn-danger btn-sm" onclick="event.stopPropagation(); disconnectTarget('${t.id}')">✕</button>
+      </div>
+    </div>`;
+  }
+
+  async function connectTarget() {
+    const serial = document.getElementById('inputSerial').value.trim();
+    const platform = document.getElementById('inputPlatform').value;
+    const nickname = document.getElementById('inputNickname').value.trim();
+    const connType = document.querySelector('input[name="connType"]:checked').value;
+
+    if (!serial) {
+      showConnectStatus('error', '⚠️ Serial is required');
+      return;
+    }
+
+    setBtnConnecting(true);
+    showConnectStatus('info', '🔌 Connecting to ' + serial + '...');
+
+    try {
+      const res = await fetch('/target-manager/api/targets/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serial, platform, nickname, connection_type: connType })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.target) {
+        showConnectStatus('success', '✅ Connected: ' + (data.target.nickname || serial));
+        document.getElementById('inputSerial').value = '';
+        document.getElementById('inputNickname').value = '';
+        await loadTargets();
+      } else {
+        showConnectStatus('error', '❌ Failed: ' + (data.error || 'Unknown error'));
+      }
+    } catch (e) {
+      showConnectStatus('error', '❌ Request failed: ' + e.message);
+    } finally {
+      setBtnConnecting(false);
+    }
+  }
+
+  function startValidation(targetId) {
+    activeTargetId = targetId;
+    const target = targets.find(t => t.id == targetId);
+    showTerminalPanel(target);
+    term.clear();
+
+    const url = `/target-manager/api/targets/${targetId}/validate/stream`;
+    const evtSource = new EventSource(url);
+
+    document.getElementById('validationStatus').textContent = '⏳ Running...';
+    document.getElementById('validationStatus').className = 'status-badge status-running';
+
+    evtSource.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+
+      if (msg.type === 'log') {
+        term.writeln(msg.text);
+      } else if (msg.type === 'step') {
+        term.writeln('\r\n\x1b[33m▶ ' + msg.step + '\x1b[0m');
+      } else if (msg.type === 'result') {
+        const color = msg.result === 'PASS' ? '\x1b[32m' : '\x1b[31m';
+        term.writeln('\r\n' + color + '══ RESULT: ' + msg.result + ' ══\x1b[0m');
+        document.getElementById('validationStatus').textContent = msg.result === 'PASS' ? '✅ PASS' : '❌ FAIL';
+        document.getElementById('validationStatus').className = 'status-badge status-' + msg.result.toLowerCase();
+        showValidationSummary(msg);
+      } else if (msg.type === 'done' || msg.event === 'done') {
+        evtSource.close();
+        loadTargets();
+        loadHistory(targetId);
+      }
+    };
+
+    evtSource.onerror = () => {
+      term.writeln('\r\n\x1b[31m[SSE Error — stream closed]\x1b[0m');
+      evtSource.close();
+    };
+  }
+
+  function initXterm() {
+    if (typeof Terminal === 'undefined') return;
+    term = new Terminal({
+      theme: {
+        background: '#0d0d0d',
+        foreground: '#e2e8f0',
+        cursor: '#7c3aed'
+      },
+      fontFamily: 'JetBrains Mono, Fira Code, monospace',
+      fontSize: 13,
+      scrollback: 2000,
+      convertEol: true
+    });
+    term.open(document.getElementById('xtermContainer'));
+  }
+
+  async function loadHistory(targetId) {
+    const filters = buildHistoryFilters();
+    const url = `/target-manager/api/targets/${targetId}/runs?${filters}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    renderHistoryTable(data.runs || [], targetId);
+    document.getElementById('historyPanel').classList.remove('hidden');
+  }
+
+  function renderHistoryTable(runs, targetId) {
+    const tbody = document.getElementById('historyTableBody');
+    if (!runs.length) {
+      tbody.innerHTML = `<tr class="empty-row"><td colspan="6">No runs found for current filters</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = runs.map(r => `
+      <tr class="history-row" onclick="openReplay('${targetId}','${r.id}')">
+        <td>${r.created_at ? new Date(r.created_at).toLocaleString() : '—'}</td>
+        <td><code>${esc(r.target_serial || '—')}</code></td>
+        <td>${esc(r.use_case || 'General Validation')}</td>
+        <td><span class="result-badge result-${(r.result||'').toLowerCase()}">${esc(r.result || '—')}</span></td>
+        <td>${r.duration_sec ? r.duration_sec + 's' : '—'}</td>
+        <td>
+          <button class="btn-ghost btn-xs" onclick="event.stopPropagation(); openReplay('${targetId}','${r.id}')">
+            ▶ Replay
+          </button>
+        </td>
+      </tr>`).join('');
+  }
+
+  async function openReplay(targetId, runId) {
+    const res = await fetch(`/target-manager/api/targets/${targetId}/runs/${runId}`);
+    const data = await res.json();
+    showTerminalPanel({ nickname: 'REPLAY: Run #' + runId });
+    term.clear();
+    term.writeln('\x1b[35m══ REPLAY MODE — Run ID: ' + runId + ' ══\x1b[0m\r\n');
+    (data.log_lines || [data.log] || []).forEach(line => {
+      term.writeln(typeof line === 'string' ? line : JSON.stringify(line));
+    });
+    term.writeln('\r\n\x1b[35m══ END OF REPLAY ══\x1b[0m');
+  }
+
+  function showTerminalPanel(target) {
+    document.getElementById('terminalPanel').classList.remove('hidden');
+    document.getElementById('terminalTargetLabel').textContent = target ? (target.nickname || target.serial || '') : '';
+    document.getElementById('terminalPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function hideTerminal() {
+    document.getElementById('terminalPanel').classList.add('hidden');
+  }
+
+  function clearTerminal() { if (term) term.clear(); }
+
+  function setBtnConnecting(loading) {
+    document.getElementById('connectBtnText').textContent = loading ? 'Connecting...' : '🔌 Connect Target';
+    document.getElementById('connectSpinner').classList.toggle('hidden', !loading);
+    document.getElementById('btnConnect').disabled = loading;
+  }
+
+  function showConnectStatus(type, msg) {
+    const el = document.getElementById('connectStatus');
+    el.className = 'connect-status status-' + type;
+    el.textContent = msg;
+    el.classList.remove('hidden');
+    if (type === 'success') {
+      setTimeout(() => el.classList.add('hidden'), 4000);
+    }
+  }
+
+  function updateTargetCount() {
+    document.getElementById('targetCount').textContent = targets.length;
+  }
+
+  async function disconnectTarget(id) {
+    if (!confirm('Disconnect this target?')) return;
+    await fetch(`/target-manager/api/targets/${id}`, { method: 'DELETE' });
+    await loadTargets();
+  }
+
+  async function refreshTarget(id) {
+    await fetch(`/target-manager/api/targets/${id}/refresh`, { method: 'POST' });
+    await loadTargets();
+  }
+
+  async function refreshAllTargets() { await loadTargets(); }
+
+  function buildHistoryFilters() {
+    const q = document.getElementById('filterSearch').value;
+    const res = document.getElementById('filterResult').value;
+    const from = document.getElementById('filterDateFrom').value;
+    const to = document.getElementById('filterDateTo').value;
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (res) params.set('result', res);
+    if (from) params.set('date_from', from);
+    if (to) params.set('date_to', to);
+    return params.toString();
+  }
+
+  function filterHistory() {
+    if (activeTargetId) loadHistory(activeTargetId);
+  }
+
+  function clearFilters() {
+    document.getElementById('filterSearch').value = '';
+    document.getElementById('filterResult').value = '';
+    document.getElementById('filterDateFrom').value = '';
+    document.getElementById('filterDateTo').value = '';
+    filterHistory();
+  }
+
+  function showValidationSummary(msg) {
+    const el = document.getElementById('validationSummary');
+    el.innerHTML = `
+      <div class="summary-box">
+        <strong>Summary</strong>
+        <p>${esc(msg.summary || 'Validation complete.')}</p>
+        ${msg.details ? `<pre>${esc(msg.details)}</pre>` : ''}
+      </div>`;
+    el.classList.remove('hidden');
+  }
+
+  function selectTarget(id) {
+    activeTargetId = id;
+    document.querySelectorAll('.target-card').forEach(c => c.classList.remove('target-card-active'));
+    document.getElementById('card-' + id)?.classList.add('target-card-active');
+  }
+</script>
+{% endblock %}

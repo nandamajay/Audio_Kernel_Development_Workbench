@@ -11,6 +11,7 @@ from app.routes.triage import triage_bp
 from app.routes.upstream import upstream_bp
 from app.routes.terminal_routes import terminal_bp
 from app.routes.dual_agent import bp as dual_agent_bp
+from app.routes.target_manager import target_manager_bp
 
 
 ALL_BLUEPRINTS = [
@@ -25,4 +26,5 @@ ALL_BLUEPRINTS = [
     agent_bp,
     terminal_bp,
     dual_agent_bp,
+    target_manager_bp,
 ]
