@@ -31,6 +31,8 @@ class AgentStreamState:
     events: List[AgentStreamEvent] = field(default_factory=list)
     done: bool = False
     error: Optional[str] = None
+    reconnect_count: int = 0
+    completed_at: float = 0.0
 
     def __post_init__(self) -> None:
         self._lock = threading.Lock()
@@ -71,6 +73,12 @@ class AgentStreamManager:
         self.ttl_seconds = ttl_seconds
         self._streams: Dict[str, AgentStreamState] = {}
         self._lock = threading.Lock()
+        self._total_streams_started = 0
+        self._total_streams_completed = 0
+        self._total_stream_errors = 0
+        self._total_reconnects = 0
+        self._total_duration_sec = 0.0
+        self._max_duration_sec = 0.0
 
     def _cleanup_locked(self) -> None:
         now = time.time()
@@ -116,6 +124,7 @@ class AgentStreamManager:
         with self._lock:
             self._cleanup_locked()
             self._streams[stream_id] = state
+            self._total_streams_started += 1
 
         t = threading.Thread(
             target=self._run_stream_worker,
@@ -193,9 +202,23 @@ class AgentStreamManager:
                 )
                 log_activity("Agent session: " + ((state.message or "(attachments)")[:50]), "agent")
                 state.finish()
+                self._mark_stream_finished(state=state, is_error=False)
             except Exception as exc:
                 state.push({"type": "error", "content": str(exc), "session_id": state.session_id})
                 state.finish(error=str(exc))
+                self._mark_stream_finished(state=state, is_error=True)
+
+    def _mark_stream_finished(self, *, state: AgentStreamState, is_error: bool) -> None:
+        now = time.time()
+        duration = max(0.0, now - float(state.created_at or now))
+        state.completed_at = now
+        with self._lock:
+            self._total_streams_completed += 1
+            if is_error:
+                self._total_stream_errors += 1
+            self._total_duration_sec += duration
+            if duration > self._max_duration_sec:
+                self._max_duration_sec = duration
 
     def sse_iter(self, stream_id: str, cursor: int = 0) -> Iterator[str]:
         state = self.get(stream_id)
@@ -204,6 +227,11 @@ class AgentStreamManager:
             yield "data: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
             yield "data: [DONE]\n\n"
             return
+
+        if int(cursor or 0) > 0:
+            with self._lock:
+                self._total_reconnects += 1
+                state.reconnect_count += 1
 
         next_event_id = max(1, int(cursor or 0) + 1)
         idle_heartbeats = 0
@@ -225,6 +253,22 @@ class AgentStreamManager:
 
         yield "data: [DONE]\n\n"
 
+    def metrics(self) -> Dict[str, Any]:
+        with self._lock:
+            self._cleanup_locked()
+            active_streams = sum(1 for state in self._streams.values() if not state.done)
+            completed = self._total_streams_completed
+            avg_duration = (self._total_duration_sec / completed) if completed else 0.0
+            return {
+                "active_streams": int(active_streams),
+                "streams_started": int(self._total_streams_started),
+                "streams_completed": int(completed),
+                "stream_errors": int(self._total_stream_errors),
+                "reconnects_total": int(self._total_reconnects),
+                "avg_duration_sec": round(avg_duration, 3),
+                "max_duration_sec": round(float(self._max_duration_sec), 3),
+                "ttl_seconds": int(self.ttl_seconds),
+            }
+
 
 agent_stream_manager = AgentStreamManager()
-

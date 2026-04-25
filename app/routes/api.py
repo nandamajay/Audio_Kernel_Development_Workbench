@@ -267,6 +267,11 @@ def agent_chat_stream_start_api():
     return jsonify({"ok": True, "stream_id": state.stream_id, "cursor": 0, "session_id": session_id})
 
 
+@api_bp.get("/api/agent/stream/metrics")
+def agent_chat_stream_metrics_api():
+    return jsonify({"ok": True, "metrics": agent_stream_manager.metrics()})
+
+
 @api_bp.post("/api/agent/new_session")
 def agent_new_session_api():
     payload = request.get_json(silent=True) or {}

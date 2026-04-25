@@ -111,6 +111,44 @@
     display: none;
   }
 
+  .agent-toast-host {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    display: grid;
+    gap: 8px;
+    z-index: 60;
+    pointer-events: none;
+  }
+
+  .agent-toast {
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: var(--text-primary);
+    background: rgba(15, 22, 41, 0.92);
+    box-shadow: var(--shadow-card);
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+  }
+
+  .agent-toast.show {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .agent-toast.success {
+    border-color: rgba(16,185,129,0.45);
+    background: rgba(16,185,129,0.16);
+  }
+
+  .agent-toast.warn {
+    border-color: rgba(245,158,11,0.45);
+    background: rgba(245,158,11,0.15);
+  }
+
   #messages-area {
     min-height: 0;
     overflow-y: auto;
@@ -489,6 +527,7 @@
     </div>
   </section>
 </div>
+<div id="agentToastHost" class="agent-toast-host" aria-live="polite"></div>
 {% endblock %}
 
 {% block scripts %}
@@ -938,6 +977,25 @@
     return new Promise(function (resolve) { setTimeout(resolve, ms); });
   }
 
+  function showAgentToast(message, type, durationMs) {
+    const host = document.getElementById('agentToastHost');
+    if (!host) return;
+    const toast = document.createElement('div');
+    toast.className = 'agent-toast ' + (type || 'success');
+    toast.textContent = message || '';
+    host.appendChild(toast);
+    requestAnimationFrame(function () {
+      toast.classList.add('show');
+    });
+    const ttl = Number(durationMs || 2200) || 2200;
+    setTimeout(function () {
+      toast.classList.remove('show');
+      setTimeout(function () {
+        if (toast.parentNode) toast.parentNode.removeChild(toast);
+      }, 200);
+    }, ttl);
+  }
+
   async function sendMessage() {
     if (replayMode || waiting) return;
     const input = document.getElementById('agentInput');
@@ -975,6 +1033,7 @@
       let responseSeen = false;
       let streamDone = false;
       let reconnectAttempt = 0;
+      let recoveredAfterReconnect = false;
 
       while (!streamDone) {
         try {
@@ -1047,11 +1106,16 @@
           }
           const waitMs = Math.min(5000, 300 * Math.pow(2, reconnectAttempt - 1));
           addThinkStep(thinkBlock, 'Reconnecting stream (attempt ' + reconnectAttempt + ')...', ++stepIdx);
+          showAgentToast('Network hiccup detected — reconnecting stream...', 'warn', 1800);
+          recoveredAfterReconnect = true;
           await sleepMs(waitMs);
         }
       }
 
       finalizeThinkBlock(thinkBlock, false);
+      if (recoveredAfterReconnect) {
+        showAgentToast('Connection recovered — stream resumed.', 'success', 2400);
+      }
       if (!responseSeen) {
         appendBubble('warning', '⚠️ Request failed. Please retry.', true);
       }
