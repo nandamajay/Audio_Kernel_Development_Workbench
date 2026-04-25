@@ -1,0 +1,31 @@
+flowchart LR
+  subgraph UI[UI Layer]
+    D[Dashboard]
+    A[Agent]
+    E[Editor]
+    P[Patchwise]
+    U[Upstream]
+    T[Triage]
+    TM[Target Manager]
+  end
+
+  subgraph APP[Flask Application]
+    R[Blueprint Routes]
+    SV[Services]
+    SH[Socket Handlers]
+  end
+
+  subgraph DATA[Data and Integrations]
+    DB[(SQLite)]
+    FS[/Workspace + Kernel Tree/]
+    QG[QGenie API]
+    EXT[External Sources\n(lore/patchwork/github/gerrit)]
+  end
+
+  UI --> R
+  R --> SV
+  R --> SH
+  SV --> DB
+  SV --> FS
+  SV --> QG
+  SV --> EXT

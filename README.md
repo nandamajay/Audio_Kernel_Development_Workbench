@@ -2,6 +2,14 @@
 
 AKDW is a Flask-based kernel development cockpit for patch review, triage, conversion, agent-assisted coding, upstream tracking, and target validation workflows in one UI.
 
+## Documentation
+
+- Docs Hub: [`docs/README.md`](./docs/README.md)
+- Architecture: [`docs/architecture.md`](./docs/architecture.md)
+- Operations: [`docs/operations.md`](./docs/operations.md)
+- Diagrams: [`docs/diagrams/akdw-overview.mmd`](./docs/diagrams/akdw-overview.mmd)
+- Screenshots: [`docs/screenshots/README.md`](./docs/screenshots/README.md)
+
 ## What You Get
 
 - Terminal-IDE style `Code Editor` with Monaco + xterm + Agent mode
@@ -124,6 +132,7 @@ curl -s http://localhost:5001/api/editor/file?path=/app/kernel
 - Shared split-layout logic is in `app/static/js/resizable.js`
 - Core route blueprints are registered in `app/routes/__init__.py`
 - App factory is in `app/__init__.py`
+- Architecture and runbooks live under `docs/`
 
 ## Troubleshooting
 
