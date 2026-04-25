@@ -184,6 +184,31 @@
       </div>
     </article>
   </section>
+
+  <section class="panel-grid">
+    <article class="panel premium-panel">
+      <div class="panel-head">
+        <h3>📡 Agent Stream Health</h3>
+      </div>
+      <div id="streamHealthRows">
+        <div class="health-row"><span>Active Streams</span><span class="health-pill na">--</span></div>
+        <div class="health-row"><span>Reconnects</span><span class="health-pill na">--</span></div>
+        <div class="health-row"><span>Stream Errors</span><span class="health-pill na">--</span></div>
+        <div class="health-row"><span>Average Duration</span><span class="health-pill na">--</span></div>
+      </div>
+    </article>
+    <article class="panel premium-panel">
+      <div class="panel-head">
+        <h3>🛡 Terminal Audit Health</h3>
+      </div>
+      <div id="terminalAuditRows">
+        <div class="health-row"><span>Last Command Status</span><span class="health-pill na">--</span></div>
+        <div class="health-row"><span>Blocked Commands</span><span class="health-pill na">--</span></div>
+        <div class="health-row"><span>Recent Actor</span><span class="health-pill na">--</span></div>
+        <div class="health-row"><span>Latest Session</span><span class="health-pill na">--</span></div>
+      </div>
+    </article>
+  </section>
 </div>
 {% endblock %}
 
@@ -342,6 +367,62 @@
     }
   }
 
+  async function loadAgentStreamHealth() {
+    const box = document.getElementById("streamHealthRows");
+    if (!box) return;
+    try {
+      const res = await fetch("/api/agent/stream/metrics");
+      if (!res.ok) {
+        box.innerHTML = '<div class="small-muted">Stream metrics unavailable.</div>';
+        return;
+      }
+      const data = await res.json();
+      const m = (data && data.metrics) || {};
+      const errors = Number(m.stream_errors || 0);
+      const reconnects = Number(m.reconnects_total || 0);
+      const active = Number(m.active_streams || 0);
+      const avg = Number(m.avg_duration_sec || 0);
+      const errClass = errors > 0 ? "fail" : "pass";
+      const recClass = reconnects > 0 ? "warn" : "pass";
+      const actClass = active > 0 ? "warn" : "pass";
+      box.innerHTML =
+        '<div class="health-row"><span>Active Streams</span><span class="health-pill ' + actClass + '">' + active + '</span></div>'
+        + '<div class="health-row"><span>Reconnects</span><span class="health-pill ' + recClass + '">' + reconnects + '</span></div>'
+        + '<div class="health-row"><span>Stream Errors</span><span class="health-pill ' + errClass + '">' + errors + '</span></div>'
+        + '<div class="health-row"><span>Average Duration</span><span class="health-pill pass">' + avg.toFixed(2) + 's</span></div>';
+    } catch (err) {
+      box.innerHTML = '<div class="small-muted">Stream metrics unavailable.</div>';
+    }
+  }
+
+  async function loadTerminalAuditHealth() {
+    const box = document.getElementById("terminalAuditRows");
+    if (!box) return;
+    try {
+      const res = await fetch("/api/terminal/audit?limit=20");
+      if (!res.ok) {
+        box.innerHTML = '<div class="small-muted">Terminal audit unavailable.</div>';
+        return;
+      }
+      const data = await res.json();
+      const rows = Array.isArray(data.rows) ? data.rows : [];
+      if (!rows.length) {
+        box.innerHTML = '<div class="small-muted">No terminal commands audited yet.</div>';
+        return;
+      }
+      const latest = rows[0] || {};
+      const blocked = rows.filter(r => r.allowed === false).length;
+      const latestOk = Number(latest.exit_code || 0) === 0 && latest.allowed !== false;
+      box.innerHTML =
+        '<div class="health-row"><span>Last Command Status</span><span class="health-pill ' + (latestOk ? 'pass' : 'warn') + '">' + (latestOk ? 'OK' : 'Attention') + '</span></div>'
+        + '<div class="health-row"><span>Blocked Commands</span><span class="health-pill ' + (blocked > 0 ? 'warn' : 'pass') + '">' + blocked + '</span></div>'
+        + '<div class="health-row"><span>Recent Actor</span><span class="health-pill na">' + (latest.actor || 'n/a') + '</span></div>'
+        + '<div class="health-row"><span>Latest Session</span><span class="health-pill na">' + (latest.session_id || 'n/a') + '</span></div>';
+    } catch (err) {
+      box.innerHTML = '<div class="small-muted">Terminal audit unavailable.</div>';
+    }
+  }
+
   function rotateTips() {
     const tips = [
       "Drop a .patch file onto Patch Workshop to start a review.",
@@ -366,7 +447,11 @@
     await loadRecentActivity();
     await loadPatchHealth();
     await loadUpstreamPreview();
+    await loadAgentStreamHealth();
+    await loadTerminalAuditHealth();
     rotateTips();
+    setInterval(loadAgentStreamHealth, 15000);
+    setInterval(loadTerminalAuditHealth, 20000);
   });
 </script>
 {% endblock %}
