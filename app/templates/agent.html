@@ -343,6 +343,30 @@
     border-color: rgba(239, 68, 68, 0.45);
   }
 
+  .stream-metrics-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 999px;
+    border: 1px solid var(--glass-border);
+    padding: 4px 10px;
+    font-size: 11px;
+    color: #c7d2e0;
+    background: rgba(255,255,255,0.04);
+  }
+
+  .stream-metrics-chip.warn {
+    border-color: rgba(245,158,11,0.45);
+    color: #fde68a;
+    background: rgba(245,158,11,0.12);
+  }
+
+  .stream-metrics-chip.danger {
+    border-color: rgba(239,68,68,0.55);
+    color: #fecaca;
+    background: rgba(239,68,68,0.14);
+  }
+
   .agent-input-wrap {
     display: grid;
     grid-template-columns: 1fr auto;
@@ -503,6 +527,7 @@
       </div>
       <div class="chat-top-actions">
         <span class="small-muted">Session: <span id="agentSessionLabel">-</span></span>
+        <span id="streamMetricsChip" class="stream-metrics-chip">📡 stream stats: --</span>
         <span id="tokenBudgetIndicator" class="token-budget">🧠 ~0 tokens used / 131,072 max</span>
         <button id="clearChatBtn" class="btn-secondary" type="button">Clear</button>
       </div>
@@ -653,6 +678,32 @@
       el.classList.add('danger');
     } else if (ratio >= 0.7) {
       el.classList.add('warn');
+    }
+  }
+
+  async function refreshStreamMetrics() {
+    const chip = document.getElementById('streamMetricsChip');
+    if (!chip) return;
+    try {
+      const res = await fetch('/api/agent/stream/metrics');
+      if (!res.ok) throw new Error('metrics fetch failed');
+      const data = await res.json();
+      const m = (data && data.metrics) || {};
+      const active = Number(m.active_streams || 0) || 0;
+      const reconnects = Number(m.reconnects_total || 0) || 0;
+      const errors = Number(m.stream_errors || 0) || 0;
+      const avg = Number(m.avg_duration_sec || 0) || 0;
+      chip.textContent = '📡 streams: ' + active + ' · reconnects: ' + reconnects + ' · errors: ' + errors + ' · avg: ' + avg.toFixed(1) + 's';
+      chip.classList.remove('warn', 'danger');
+      if (errors > 0) {
+        chip.classList.add('danger');
+      } else if (reconnects > 0 || active > 0) {
+        chip.classList.add('warn');
+      }
+    } catch (err) {
+      chip.textContent = '📡 stream stats unavailable';
+      chip.classList.remove('warn');
+      chip.classList.add('danger');
     }
   }
 
@@ -1312,6 +1363,8 @@
       createFreshSession();
     }
     autoResizeInput();
+    refreshStreamMetrics();
+    setInterval(refreshStreamMetrics, 10000);
   });
 })();
 </script>
