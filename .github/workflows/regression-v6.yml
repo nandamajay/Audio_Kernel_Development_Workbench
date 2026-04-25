@@ -46,6 +46,30 @@ jobs:
           docker version
           $COMPOSE_CMD version
 
+      - name: Prepare CI Workspace Env
+        run: |
+          set -e
+          mkdir -p kernel sessions patches certs
+          if [ ! -f .env ]; then
+            cp .env.example .env
+          fi
+          set_kv() {
+            key="$1"
+            val="$2"
+            if grep -q "^${key}=" .env; then
+              sed -i "s|^${key}=.*|${key}=${val}|" .env
+            else
+              echo "${key}=${val}" >> .env
+            fi
+          }
+          set_kv "HOST_WORKSPACE_PATH" "${GITHUB_WORKSPACE}"
+          set_kv "HOST_KERNEL_PATH" "${GITHUB_WORKSPACE}/kernel"
+          set_kv "HOST_SESSIONS_PATH" "${GITHUB_WORKSPACE}/sessions"
+          set_kv "HOST_PATCHES_PATH" "${GITHUB_WORKSPACE}/patches"
+          set_kv "HOST_MNT_WORKSPACE_PATH" "/tmp"
+          echo "CI .env prepared:"
+          grep -E "^(HOST_WORKSPACE_PATH|HOST_KERNEL_PATH|HOST_SESSIONS_PATH|HOST_PATCHES_PATH|HOST_MNT_WORKSPACE_PATH)=" .env
+
       - name: Build and start AKDW
         run: |
           ${COMPOSE_CMD} up -d --build akdw

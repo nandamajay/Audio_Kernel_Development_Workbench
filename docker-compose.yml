@@ -7,14 +7,12 @@ services:
     ports:
       - "${AKDW_PORT:-5001}:${FLASK_PORT:-5000}"
     volumes:
-      - /local/mnt/workspace/AUDIO_KERNEL_DEVELOPMENT_WORKBENCH(AKDW):/app/workspace:rw
-      - /local/mnt/workspace/AUDIO_KERNEL_DEVELOPMENT_WORKBENCH(AKDW)/kernel:/app/kernel:rw
-      - /local/mnt/workspace/AUDIO_KERNEL_DEVELOPMENT_WORKBENCH(AKDW)/sessions:/app/sessions:rw
-      - /local/mnt/workspace/AUDIO_KERNEL_DEVELOPMENT_WORKBENCH(AKDW)/patches:/app/patches:rw
-      - /local/mnt/workspace:/local/mnt/workspace:ro
+      - ${HOST_WORKSPACE_PATH:-.}:/app/workspace:rw
+      - ${HOST_KERNEL_PATH:-./kernel}:/app/kernel:rw
+      - ${HOST_SESSIONS_PATH:-./sessions}:/app/sessions:rw
+      - ${HOST_PATCHES_PATH:-./patches}:/app/patches:rw
+      - ${HOST_MNT_WORKSPACE_PATH:-/tmp}:/local/mnt/workspace:ro
       - ./certs:/app/certs:ro
-      - ~/.gitconfig:/root/.gitconfig:ro
-      - ~/.ssh:/root/.ssh:ro
     env_file:
       - .env
     environment:
