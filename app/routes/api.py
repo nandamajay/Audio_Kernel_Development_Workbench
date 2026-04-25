@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import json as pyjson
 import os
 import re
 import shlex
 import subprocess
-import time
 from datetime import datetime
-from typing import Any, Dict, List
 
 from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
 
@@ -18,9 +15,9 @@ from app.services.env_service import load_env_values, save_env_values
 from app.services.fs_service import list_browse_roots, list_directory, safe_path
 from app.services.git_service import list_recent_commits
 from app.services.activity_service import log_activity
+from app.services.agent_stream_service import agent_stream_manager
 from app.services.session_service import (
     active_sessions_count,
-    append_message,
     create_session,
     create_session_id,
     ensure_session,
@@ -169,6 +166,67 @@ def agent_chat_api():
 @api_bp.post("/api/agent/stream")
 def agent_chat_stream_api():
     payload = request.get_json(silent=True) or {}
+    stream_id = str(payload.get("stream_id") or "").strip()
+    cursor_raw = payload.get("cursor", 0)
+    try:
+        cursor = max(0, int(cursor_raw))
+    except (TypeError, ValueError):
+        cursor = 0
+
+    if not stream_id:
+        message = (payload.get("message") or payload.get("query") or "").strip()
+        files_payload = payload.get("attachments") or payload.get("files") or []
+        if not message and not files_payload:
+            return jsonify({"ok": False, "error": "Message or attachments required"}), 400
+
+        session_id = (payload.get("session_id") or create_session_id()).strip()
+        model = (payload.get("model") or get_default_model()).strip()
+        page = (payload.get("page") or "agent").strip()
+        selected_code = payload.get("selected_code", "")
+        filename = payload.get("filename", "")
+        service = current_app.extensions["agent_service"]
+
+        normalized_attachments = []
+        for item in files_payload:
+            if isinstance(item, dict):
+                normalized_attachments.append(
+                    {
+                        "filename": item.get("filename") or item.get("name") or "attachment.txt",
+                        "content": item.get("content", ""),
+                    }
+                )
+            elif isinstance(item, str):
+                normalized_attachments.append({"filename": item, "content": ""})
+
+        ensure_session(session_id=session_id, page=page, model=model)
+        app_obj = current_app._get_current_object()
+        state = agent_stream_manager.start_stream(
+            app=app_obj,
+            agent_service=service,
+            session_id=session_id,
+            message=message,
+            model=model,
+            page=page,
+            attachments=normalized_attachments,
+            selected_code=selected_code,
+            filename=filename,
+        )
+        stream_id = state.stream_id
+        cursor = 0
+
+    return Response(
+        stream_with_context(agent_stream_manager.sse_iter(stream_id=stream_id, cursor=cursor)),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@api_bp.post("/api/agent/stream/start")
+def agent_chat_stream_start_api():
+    payload = request.get_json(silent=True) or {}
     message = (payload.get("message") or payload.get("query") or "").strip()
     files_payload = payload.get("attachments") or payload.get("files") or []
     if not message and not files_payload:
@@ -177,6 +235,8 @@ def agent_chat_stream_api():
     session_id = (payload.get("session_id") or create_session_id()).strip()
     model = (payload.get("model") or get_default_model()).strip()
     page = (payload.get("page") or "agent").strip()
+    selected_code = payload.get("selected_code", "")
+    filename = payload.get("filename", "")
     service = current_app.extensions["agent_service"]
 
     normalized_attachments = []
@@ -192,77 +252,19 @@ def agent_chat_stream_api():
             normalized_attachments.append({"filename": item, "content": ""})
 
     ensure_session(session_id=session_id, page=page, model=model)
-
-    def _evt(data: Dict[str, Any]) -> str:
-        return "data: " + pyjson.dumps(data, ensure_ascii=False) + "\n\n"
-
-    @stream_with_context
-    def generate():
-        thinking_steps = [
-            "🧠 Analyzing your query...",
-            "⚙️ Preparing context and session state...",
-        ]
-        for file_item in normalized_attachments:
-            thinking_steps.append("📄 Reading: " + str(file_item.get("filename") or "attachment"))
-        thinking_steps.append("⚙️ Invoking QGenie agent...")
-
-        for idx, step in enumerate(thinking_steps, start=1):
-            append_message(
-                session_id=session_id,
-                role="assistant",
-                content=step,
-                step_type="thinking",
-            )
-            yield _evt({"type": "thinking", "step": step, "idx": idx})
-            time.sleep(0.05)
-
-        try:
-            result = service.stream_chat(
-                session_id=session_id,
-                message=message,
-                model=model,
-                attachments=normalized_attachments,
-                selected_code=payload.get("selected_code", ""),
-                filename=payload.get("filename", ""),
-                page=page,
-            )
-            notices = result.get("notices", []) or []
-            for offset, notice in enumerate(notices, start=1):
-                step = "⚠️ " + str(notice)
-                append_message(
-                    session_id=session_id,
-                    role="assistant",
-                    content=step,
-                    step_type="thinking",
-                )
-                yield _evt({"type": "thinking", "step": step, "idx": len(thinking_steps) + offset})
-
-            tokens = {
-                "used": int(result.get("token_usage_estimate", 0) or 0),
-                "limit": int(result.get("token_usage_max", 131072) or 131072),
-            }
-            yield _evt(
-                {
-                    "type": "response",
-                    "content": result.get("response", ""),
-                    "tokens": tokens,
-                    "session_id": session_id,
-                }
-            )
-            log_activity("Agent session: " + ((message or "(attachments)")[:50]), "agent")
-        except Exception as exc:
-            yield _evt({"type": "error", "content": str(exc), "session_id": session_id})
-
-        yield "data: [DONE]\n\n"
-
-    return Response(
-        generate(),
-        mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
+    app_obj = current_app._get_current_object()
+    state = agent_stream_manager.start_stream(
+        app=app_obj,
+        agent_service=service,
+        session_id=session_id,
+        message=message,
+        model=model,
+        page=page,
+        attachments=normalized_attachments,
+        selected_code=selected_code,
+        filename=filename,
     )
+    return jsonify({"ok": True, "stream_id": state.stream_id, "cursor": 0, "session_id": session_id})
 
 
 @api_bp.post("/api/agent/new_session")

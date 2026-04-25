@@ -915,6 +915,29 @@
     });
   }
 
+  function parseSseEventFrame(frameRaw) {
+    const frame = String(frameRaw || '');
+    const lines = frame.split('\n');
+    const dataLines = [];
+    let eventId = 0;
+
+    lines.forEach(function (line) {
+      if (line.startsWith('id:')) {
+        const parsed = Number(line.slice(3).trim());
+        if (Number.isFinite(parsed) && parsed > 0) {
+          eventId = parsed;
+        }
+      } else if (line.startsWith('data:')) {
+        dataLines.push(line.slice(5).trim());
+      }
+    });
+    return { id: eventId, data: dataLines.join('\n') };
+  }
+
+  function sleepMs(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+
   async function sendMessage() {
     if (replayMode || waiting) return;
     const input = document.getElementById('agentInput');
@@ -930,7 +953,7 @@
     setSendWaiting(true);
 
     try {
-      const res = await fetch('/api/agent/stream', {
+      const startRes = await fetch('/api/agent/stream/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -941,51 +964,94 @@
           attachments: attached,
         }),
       });
-      if (!res.ok || !res.body) {
-        throw new Error('Stream request failed');
+      if (!startRes.ok) {
+        throw new Error('Failed to start stream');
       }
+      const startData = await startRes.json();
+      const streamId = String((startData && startData.stream_id) || '');
+      if (!streamId) throw new Error('Missing stream_id');
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
+      let cursor = Number((startData && startData.cursor) || 0) || 0;
       let responseSeen = false;
+      let streamDone = false;
+      let reconnectAttempt = 0;
 
-      while (true) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        buffer += decoder.decode(chunk.value, { stream: true });
-        const events = buffer.split('\n\n');
-        buffer = events.pop() || '';
-
-        events.forEach(function (evtRaw) {
-          const line = evtRaw.split('\n').find(function (ln) { return ln.startsWith('data:'); });
-          if (!line) return;
-          const raw = line.slice(5).trim();
-          if (!raw) return;
-          if (raw === '[DONE]') {
-            finalizeThinkBlock(thinkBlock, false);
-            return;
+      while (!streamDone) {
+        try {
+          const res = await fetch('/api/agent/stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stream_id: streamId, cursor: cursor }),
+          });
+          if (!res.ok || !res.body) {
+            throw new Error('Stream request failed');
           }
-          try {
-            const evt = JSON.parse(raw);
-            if (evt.type === 'thinking') {
-              addThinkStep(thinkBlock, evt.step || '...', ++stepIdx);
-              scrollToBottom();
-            } else if (evt.type === 'response') {
-              finalizeThinkBlock(thinkBlock, false);
-              appendFinalResponse(evt.content || '', evt.tokens || null);
-              responseSeen = true;
-            } else if (evt.type === 'error') {
-              finalizeThinkBlock(thinkBlock, true);
-              addThinkStep(thinkBlock, 'Error: ' + (evt.content || 'stream failed'), ++stepIdx);
-              if (!responseSeen) appendBubble('warning', '⚠️ ' + (evt.content || 'Request failed. Please retry.'), true);
+
+          reconnectAttempt = 0;
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+
+          while (true) {
+            const chunk = await reader.read();
+            if (chunk.done) break;
+            buffer += decoder.decode(chunk.value, { stream: true });
+            const frames = buffer.split('\n\n');
+            buffer = frames.pop() || '';
+
+            for (const frameRaw of frames) {
+              const frame = String(frameRaw || '').trim();
+              if (!frame || frame.startsWith(':')) continue;
+              const parsed = parseSseEventFrame(frame);
+              if (parsed.id && parsed.id > cursor) {
+                cursor = parsed.id;
+              }
+              const raw = parsed.data;
+              if (!raw) continue;
+
+              if (raw === '[DONE]') {
+                streamDone = true;
+                break;
+              }
+
+              try {
+                const evt = JSON.parse(raw);
+                if (evt.type === 'meta') {
+                  continue;
+                }
+                if (evt.type === 'thinking') {
+                  addThinkStep(thinkBlock, evt.step || '...', ++stepIdx);
+                  scrollToBottom();
+                } else if (evt.type === 'response') {
+                  finalizeThinkBlock(thinkBlock, false);
+                  appendFinalResponse(evt.content || '', evt.tokens || null);
+                  responseSeen = true;
+                } else if (evt.type === 'error') {
+                  finalizeThinkBlock(thinkBlock, true);
+                  addThinkStep(thinkBlock, 'Error: ' + (evt.content || 'stream failed'), ++stepIdx);
+                  if (!responseSeen) appendBubble('warning', '⚠️ ' + (evt.content || 'Request failed. Please retry.'), true);
+                }
+              } catch (err) {
+                // Ignore partial frames or non-JSON payloads.
+              }
             }
-          } catch (err) {
-            // Ignore partial chunks.
+            if (streamDone) break;
           }
-        });
+          if (!streamDone) {
+            throw new Error('Stream interrupted');
+          }
+        } catch (err) {
+          reconnectAttempt += 1;
+          if (reconnectAttempt > 5) {
+            throw err;
+          }
+          const waitMs = Math.min(5000, 300 * Math.pow(2, reconnectAttempt - 1));
+          addThinkStep(thinkBlock, 'Reconnecting stream (attempt ' + reconnectAttempt + ')...', ++stepIdx);
+          await sleepMs(waitMs);
+        }
       }
 
+      finalizeThinkBlock(thinkBlock, false);
       if (!responseSeen) {
         appendBubble('warning', '⚠️ Request failed. Please retry.', true);
       }

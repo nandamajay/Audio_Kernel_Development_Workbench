@@ -8,6 +8,7 @@ import time
 from flask import Blueprint, current_app, jsonify, request
 
 from app.config import get_default_model
+from app.models import TerminalCommandAudit
 from app.services.terminal_service import terminal_service
 
 
@@ -65,9 +66,10 @@ def terminal_agent_mode():
 
     commands = terminal_service.extract_bash_blocks(response)
     outputs = []
+    actor = (payload.get("actor") or "terminal-agent").strip()
     for cmd in commands:
         socketio.emit("agent:tool_call", {"session_id": session_id, "message": f"⚡ Running: {cmd}"}, namespace="/terminal", to=session_id)
-        out = terminal_service.execute_safe_command(session_id, cmd, cwd=cwd)
+        out = terminal_service.execute_safe_command(session_id, cmd, cwd=cwd, actor=actor)
         outputs.append({"cmd": cmd, "output": out})
         socketio.emit("agent:output", {"session_id": session_id, "output": out}, namespace="/terminal", to=session_id)
 
@@ -87,5 +89,43 @@ def terminal_agent_mode():
             "outputs": outputs,
             "cwd": cwd if os.path.isdir(cwd) else "/app/kernel",
             "elapsed_s": elapsed,
+        }
+    )
+
+
+@terminal_bp.get("/api/terminal/audit")
+def terminal_audit():
+    limit_raw = request.args.get("limit", "100")
+    session_id = (request.args.get("session_id") or "").strip()
+    try:
+        limit = int(limit_raw)
+    except ValueError:
+        limit = 100
+    limit = min(500, max(1, limit))
+
+    query = TerminalCommandAudit.query.order_by(TerminalCommandAudit.created_at.desc())
+    if session_id:
+        query = query.filter_by(session_id=session_id)
+    rows = query.limit(limit).all()
+
+    return jsonify(
+        {
+            "ok": True,
+            "count": len(rows),
+            "rows": [
+                {
+                    "id": row.id,
+                    "session_id": row.session_id,
+                    "actor": row.actor,
+                    "command": row.command,
+                    "cwd": row.cwd,
+                    "exit_code": row.exit_code,
+                    "allowed": bool(row.allowed),
+                    "blocked_reason": row.blocked_reason or "",
+                    "output_preview": row.output_preview or "",
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                }
+                for row in rows
+            ],
         }
     )

@@ -151,3 +151,18 @@ class ValidationRun(db.Model):
     llm_summary = db.Column(db.Text, nullable=True)
     result = db.Column(db.String(16), nullable=False, default="ERROR")
     timestamp = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class TerminalCommandAudit(db.Model):
+    __tablename__ = "terminal_command_audit"
+
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.String(64), nullable=False, index=True)
+    actor = db.Column(db.String(64), nullable=False, default="agent_mode")
+    command = db.Column(db.Text, nullable=False)
+    cwd = db.Column(db.String(512), nullable=True)
+    exit_code = db.Column(db.Integer, nullable=False, default=0)
+    allowed = db.Column(db.Boolean, nullable=False, default=True)
+    blocked_reason = db.Column(db.String(255), nullable=True)
+    output_preview = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
