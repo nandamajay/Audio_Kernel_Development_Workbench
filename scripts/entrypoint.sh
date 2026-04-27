@@ -32,5 +32,10 @@ import os
 from app import create_app, socketio
 
 app = create_app()
-socketio.run(app, host="0.0.0.0", port=int(os.environ.get("FLASK_PORT", "5000")))
+socketio.run(
+    app,
+    host="0.0.0.0",
+    port=int(os.environ.get("FLASK_PORT", "5000")),
+    use_reloader=False,
+)
 PY
