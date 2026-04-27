@@ -1,0 +1,16 @@
+[PASS] TC01 - Flask app starts
+[PASS] TC02 - /editor/ route returns 200
+[PASS] TC03 - /api/terminal/hosts valid JSON
+[PASS] TC04 - /api/terminal/sessions valid JSON
+[PASS] TC05 - xterm.js CDN in editor page
+[PASS] TC06 - socket.io.js in editor page
+[PASS] TC07 - akdw_terminal.js served
+[PASS] TC08 - akdw_sessions.js served
+[PASS] TC09 - akdw_qgenie_drawer.js served
+[PASS] TC10 - akdw_terminal.css served
+[PASS] TC11 - SSH connect modal present
+[PASS] TC12 - Tab bar present
+[PASS] TC13 - QGenie drawer present
+[PASS] TC14 - ssh_manager imports cleanly
+[PASS] TC15 - paramiko available
+SUMMARY: 15/15 passed
