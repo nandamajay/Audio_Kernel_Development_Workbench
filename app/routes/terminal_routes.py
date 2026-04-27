@@ -4,15 +4,155 @@ from __future__ import annotations
 
 import os
 import time
+import uuid
 
 from flask import Blueprint, current_app, jsonify, request
-
+from flask_socketio import emit, join_room, leave_room
 from app.config import get_default_model
-from app.models import TerminalCommandAudit
+from app.models import (
+    TerminalCommandAudit,
+    delete_host_from_db,
+    get_saved_hosts,
+    save_host_to_db,
+)
+from app.ssh_manager import (
+    close_session as close_ssh_session,
+    create_session as create_ssh_session,
+    get_session as get_ssh_session,
+    list_sessions as list_ssh_sessions,
+)
 from app.services.terminal_service import terminal_service
 
 
 terminal_bp = Blueprint("terminal", __name__)
+_socket_handlers_registered = False
+
+
+@terminal_bp.get("/api/terminal/sessions")
+def get_terminal_sessions():
+    return jsonify({"sessions": list_ssh_sessions()})
+
+
+@terminal_bp.get("/api/terminal/hosts")
+def get_terminal_hosts():
+    return jsonify({"hosts": get_saved_hosts()})
+
+
+@terminal_bp.post("/api/terminal/hosts")
+def save_terminal_host():
+    payload = request.get_json(silent=True) or {}
+    hostname = (payload.get("hostname") or "").strip()
+    if not hostname:
+        return jsonify({"success": False, "error": "hostname is required"}), 400
+    try:
+        host_id = save_host_to_db(
+            label=(payload.get("label") or hostname),
+            hostname=hostname,
+            port=int(payload.get("port") or 22),
+            username=(payload.get("username") or "").strip(),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"success": False, "error": str(exc)}), 400
+    return jsonify({"success": True, "id": host_id})
+
+
+@terminal_bp.delete("/api/terminal/hosts/<int:host_id>")
+def delete_terminal_host(host_id: int):
+    delete_host_from_db(host_id)
+    return jsonify({"success": True})
+
+
+def register_terminal_socketio_handlers(sio):
+    global _socket_handlers_registered
+    if _socket_handlers_registered:
+        return
+    _socket_handlers_registered = True
+
+    @sio.on("terminal_join")
+    def handle_terminal_join(data):
+        session_id = (data or {}).get("session_id")
+        if not session_id:
+            return
+        join_room(session_id)
+        emit("joined", {"session_id": session_id, "status": "ok"})
+
+    @sio.on("terminal_connect")
+    def handle_terminal_connect(data):
+        payload = data or {}
+        session_id = (payload.get("session_id") or "").strip() or str(uuid.uuid4())[:8]
+        hostname = (payload.get("hostname") or "").strip()
+        username = (payload.get("username") or "").strip()
+        if not hostname or not username:
+            emit(
+                "terminal_error",
+                {"session_id": session_id, "message": "hostname and username are required"},
+                room=session_id,
+            )
+            return
+
+        join_room(session_id)
+        close_ssh_session(session_id)
+        sess = create_ssh_session(session_id=session_id, socketio=sio)
+        result = sess.connect(
+            hostname=hostname,
+            port=int(payload.get("port") or 22),
+            username=username,
+            password=payload.get("password"),
+            key_path=payload.get("key_path"),
+        )
+        if result.get("success"):
+            sess.start_pty_reader()
+            sio.emit(
+                "terminal_connected",
+                {
+                    "session_id": session_id,
+                    "hostname": hostname,
+                    "username": username,
+                    "message": result.get("message") or f"Connected to {username}@{hostname}",
+                },
+                room=session_id,
+            )
+            return
+
+        close_ssh_session(session_id)
+        sio.emit(
+            "terminal_error",
+            {"session_id": session_id, "message": result.get("message") or "Connection failed"},
+            room=session_id,
+        )
+
+    @sio.on("terminal_input")
+    def handle_terminal_input(data):
+        payload = data or {}
+        session_id = payload.get("session_id")
+        ssh_sess = get_ssh_session(session_id) if session_id else None
+        if ssh_sess:
+            ssh_sess.send(payload.get("data") or "")
+            return
+        emit(
+            "terminal_error",
+            {"session_id": session_id, "message": "Session not found or expired"},
+            room=session_id,
+        )
+
+    @sio.on("terminal_resize")
+    def handle_terminal_resize(data):
+        payload = data or {}
+        session_id = payload.get("session_id")
+        ssh_sess = get_ssh_session(session_id) if session_id else None
+        if not ssh_sess:
+            return
+        ssh_sess.resize(int(payload.get("cols") or 120), int(payload.get("rows") or 40))
+
+    @sio.on("terminal_disconnect_session")
+    def handle_terminal_disconnect_session(data):
+        payload = data or {}
+        session_id = payload.get("session_id")
+        if not session_id:
+            return
+        close_ssh_session(session_id)
+        leave_room(session_id)
+        emit("terminal_closed", {"session_id": session_id, "message": "Disconnected"})
 
 
 @terminal_bp.post("/api/terminal/session")

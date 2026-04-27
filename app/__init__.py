@@ -12,8 +12,9 @@ from flask_socketio import SocketIO
 from app.config import Config, is_first_run
 from app.agents.project_plan_manager import ProjectPlanManager
 from app.db import ensure_dual_agent_tables
-from app.models import db
+from app.models import db, ensure_default_saved_host
 from app.routes import ALL_BLUEPRINTS
+from app.routes.terminal_routes import register_terminal_socketio_handlers
 from app.services.agent_service import AgentService
 from app.services.env_service import resolve_ssl_verify
 from app.services.fs_service import ensure_workspace_structure
@@ -41,6 +42,7 @@ def create_app(config_class=Config):
 
     app.extensions["agent_service"] = AgentService(socketio)
     register_socket_handlers(socketio)
+    register_terminal_socketio_handlers(socketio)
 
     @app.context_processor
     def _inject_plan_meta():
@@ -71,6 +73,7 @@ def create_app(config_class=Config):
 
     with app.app_context():
         db.create_all()
+        ensure_default_saved_host()
     ensure_dual_agent_tables()
 
     return app

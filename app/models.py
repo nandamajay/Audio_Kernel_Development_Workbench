@@ -209,3 +209,88 @@ class TerminalCommandAudit(db.Model):
     blocked_reason = db.Column(db.String(255), nullable=True)
     output_preview = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class SavedHost(db.Model):
+    __tablename__ = "saved_hosts"
+
+    id = db.Column(db.Integer, primary_key=True)
+    label = db.Column(db.String(255), nullable=False)
+    hostname = db.Column(db.String(255), nullable=False, index=True)
+    port = db.Column(db.Integer, nullable=False, default=22)
+    username = db.Column(db.String(255), nullable=True, default="")
+    is_default = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+def get_saved_hosts() -> list:
+    rows = (
+        SavedHost.query.order_by(SavedHost.is_default.desc(), SavedHost.created_at.asc())
+        .all()
+    )
+    return [
+        {
+            "id": row.id,
+            "label": row.label,
+            "hostname": row.hostname,
+            "port": int(row.port or 22),
+            "username": row.username or "",
+            "default": bool(row.is_default),
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+        for row in rows
+    ]
+
+
+def save_host_to_db(label: str, hostname: str, port: int = 22, username: str = "") -> int:
+    clean_host = (hostname or "").strip()
+    if not clean_host:
+        raise ValueError("hostname is required")
+    clean_label = (label or clean_host).strip()
+    clean_user = (username or "").strip()
+    clean_port = int(port or 22)
+
+    existing = SavedHost.query.filter_by(
+        hostname=clean_host,
+        port=clean_port,
+        username=clean_user,
+    ).first()
+    if existing:
+        existing.label = clean_label
+        db.session.commit()
+        return int(existing.id)
+
+    row = SavedHost(
+        label=clean_label,
+        hostname=clean_host,
+        port=clean_port,
+        username=clean_user,
+    )
+    db.session.add(row)
+    db.session.commit()
+    return int(row.id)
+
+
+def delete_host_from_db(host_id: int) -> None:
+    row = SavedHost.query.get(int(host_id))
+    if row:
+        db.session.delete(row)
+        db.session.commit()
+
+
+def ensure_default_saved_host() -> None:
+    existing = SavedHost.query.filter_by(hostname="hu-nandam-hyd", port=22, username="nandam").first()
+    if existing:
+        if not existing.is_default:
+            existing.is_default = True
+            db.session.commit()
+        return
+    row = SavedHost(
+        label="hu-nandam-hyd",
+        hostname="hu-nandam-hyd",
+        port=22,
+        username="nandam",
+        is_default=True,
+    )
+    db.session.add(row)
+    db.session.commit()
