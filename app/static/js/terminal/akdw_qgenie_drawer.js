@@ -5,6 +5,34 @@
 
 const AKDW_QGenie = (() => {
   let drawerOpen = false;
+  const INPUT_FOCUS_KEY = 'drawer';
+
+  function setInputFocus(active) {
+    window.AKDW_INPUT_FOCUS = active ? INPUT_FOCUS_KEY : null;
+  }
+
+  function stopBubbling(event) {
+    if (event) {
+      event.stopPropagation();
+    }
+  }
+
+  function bindDrawerInputGuards() {
+    const input = document.getElementById('drawerInput');
+    if (!input || input.dataset.akdwGuardBound === '1') return;
+    input.dataset.akdwGuardBound = '1';
+
+    input.addEventListener('focus', () => setInputFocus(true));
+    input.addEventListener('blur', () => {
+      if (window.AKDW_INPUT_FOCUS === INPUT_FOCUS_KEY) {
+        setInputFocus(false);
+      }
+    });
+
+    ['keydown', 'keypress', 'keyup', 'input', 'paste', 'cut', 'copy'].forEach((evt) => {
+      input.addEventListener(evt, stopBubbling);
+    });
+  }
 
   function toggleQGenieDrawer() {
     const drawer = document.getElementById('qgenieDrawer');
@@ -15,14 +43,24 @@ const AKDW_QGenie = (() => {
     if (drawerOpen) {
       drawer.classList.remove('collapsed');
       toggleBtn.classList.add('hidden');
+      bindDrawerInputGuards();
+      const input = document.getElementById('drawerInput');
+      if (input) {
+        input.focus();
+        setInputFocus(true);
+      }
     } else {
       drawer.classList.add('collapsed');
       toggleBtn.classList.remove('hidden');
+      if (window.AKDW_INPUT_FOCUS === INPUT_FOCUS_KEY) {
+        setInputFocus(false);
+      }
     }
     AKDW_Terminal.resizeAll();
   }
 
   function handleDrawerKey(event) {
+    stopBubbling(event);
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       sendDrawerMessage();
@@ -57,6 +95,11 @@ const AKDW_QGenie = (() => {
       removeMessage(thinkingId);
       addMessage('error', 'QGenie error: ' + err.message);
     }
+
+    setTimeout(() => {
+      input.focus();
+      setInputFocus(true);
+    }, 0);
   }
 
   function addMessage(role, content) {
@@ -124,7 +167,8 @@ const AKDW_QGenie = (() => {
   return {
     toggleQGenieDrawer,
     handleDrawerKey,
-    sendDrawerMessage
+    sendDrawerMessage,
+    bindDrawerInputGuards
   };
 })();
 window.AKDW_QGenie = AKDW_QGenie;
@@ -144,3 +188,7 @@ function copyToClipboard(btn) {
     }, 1200);
   });
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+  AKDW_QGenie.bindDrawerInputGuards();
+});

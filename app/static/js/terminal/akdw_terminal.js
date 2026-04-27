@@ -38,6 +38,14 @@ const AKDW_Terminal = (() => {
     selectionBackground: '#264F78'
   };
 
+  function isDrawerInputActive() {
+    const active = document.activeElement;
+    if (!active) return window.AKDW_INPUT_FOCUS === 'drawer';
+    if (window.AKDW_INPUT_FOCUS === 'drawer') return true;
+    if (active.id === 'drawerInput') return true;
+    return Boolean(active.closest && active.closest('#qgenieDrawer'));
+  }
+
   function initSocket() {
     if (socket) return socket;
 
@@ -141,11 +149,18 @@ const AKDW_Terminal = (() => {
     if (fitAddon) fitAddon.fit();
 
     term.onData((data) => {
+      if (isDrawerInputActive()) return;
       socket.emit('terminal_input', { session_id: sessionId, data });
     });
 
     term.onResize(({ cols, rows }) => {
       socket.emit('terminal_resize', { session_id: sessionId, cols, rows });
+    });
+
+    term.onFocus(() => {
+      if (window.AKDW_INPUT_FOCUS === 'drawer') {
+        window.AKDW_INPUT_FOCUS = null;
+      }
     });
 
     socket.emit('terminal_join', { session_id: sessionId });
