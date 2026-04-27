@@ -12,7 +12,7 @@ const AKDW_Terminal = (() => {
   const MIN_FONT_SIZE = 10;
   const MAX_FONT_SIZE = 24;
   const FONT_STORAGE_KEY = 'akdw_terminal_font_size';
-  let currentFontSize = readStoredFontSize();
+  let currentFontSize = 13;
 
   const MOBATERM_THEME = {
     background: '#0D1117',
@@ -324,16 +324,17 @@ const AKDW_Terminal = (() => {
   }
 
   function readStoredFontSize() {
-    const raw = window.localStorage.getItem(FONT_STORAGE_KEY);
+    const raw = safeStorageGet(FONT_STORAGE_KEY);
     const parsed = parseInt(raw || '13', 10);
     if (Number.isNaN(parsed)) return 13;
     return Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, parsed));
   }
 
   function setFontSize(size) {
+    if (!Number.isFinite(size)) size = 13;
     const next = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, size));
     currentFontSize = next;
-    window.localStorage.setItem(FONT_STORAGE_KEY, String(next));
+    safeStorageSet(FONT_STORAGE_KEY, String(next));
 
     Object.keys(terminals).forEach((sid) => {
       const t = terminals[sid];
@@ -356,12 +357,20 @@ const AKDW_Terminal = (() => {
     setFontSize(currentFontSize + delta);
   }
 
-  function bootSessionUi() {
-    if (window.AKDW_Sessions && typeof AKDW_Sessions.initialize === 'function') {
-      AKDW_Sessions.initialize();
-      return;
+  function safeStorageGet(key) {
+    try {
+      return window.localStorage.getItem(key);
+    } catch (_err) {
+      return null;
     }
-    window.setTimeout(bootSessionUi, 120);
+  }
+
+  function safeStorageSet(key, value) {
+    try {
+      window.localStorage.setItem(key, value);
+    } catch (_err) {
+      // no-op (private mode / policy lock)
+    }
   }
 
   window.addEventListener('resize', resizeAll);
@@ -377,7 +386,8 @@ const AKDW_Terminal = (() => {
     setFontSize,
     adjustFontSize,
     getActive: () => activeSessionId,
-    getTerminals: () => terminals
+    getTerminals: () => terminals,
+    readStoredFontSize
   };
 })();
 
@@ -462,14 +472,13 @@ function decreaseTerminalFont() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  AKDW_Terminal.setFontSize(parseInt(window.localStorage.getItem('akdw_terminal_font_size') || '13', 10));
-  if (window.AKDW_Sessions && typeof AKDW_Sessions.initialize === 'function') {
-    AKDW_Sessions.initialize();
-  } else {
-    window.setTimeout(() => {
-      if (window.AKDW_Sessions && typeof AKDW_Sessions.initialize === 'function') {
-        AKDW_Sessions.initialize();
-      }
-    }, 200);
-  }
+  AKDW_Terminal.setFontSize(AKDW_Terminal.readStoredFontSize());
+  const tryInit = () => {
+    if (window.AKDW_Sessions && typeof AKDW_Sessions.initialize === 'function') {
+      AKDW_Sessions.initialize();
+      return;
+    }
+    window.setTimeout(tryInit, 120);
+  };
+  tryInit();
 });
