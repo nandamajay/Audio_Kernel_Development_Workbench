@@ -1,0 +1,36 @@
+[2026-04-27T11:08:05Z] S0 preflight start
+[2026-04-27T12:11:32Z] package install start
+pip install success
+Name: Flask-SocketIO
+Version: 5.3.6
+Summary: Socket.IO integration for Flask applications
+Home-page: https://github.com/miguelgrinberg/flask-socketio
+Author: Miguel Grinberg
+Author-email: miguel.grinberg@gmail.com
+License: 
+Location: /usr2/nandam/.local/lib/python3.10/site-packages
+Requires: Flask, python-socketio
+Required-by: 
+---
+Name: paramiko
+Version: 4.0.0
+Summary: SSH2 protocol library
+Home-page: 
+Author: 
+Author-email: Jeff Forcier <jeff@bitprophet.org>
+License: 
+Location: /usr2/nandam/.local/lib/python3.10/site-packages
+Requires: bcrypt, cryptography, invoke, pynacl
+Required-by: 
+---
+Name: eventlet
+Version: 0.36.1
+Summary: Highly concurrent networking library
+Home-page: 
+Author: 
+Author-email: Sergey Shepelev <temotor@gmail.com>, Jakub Stasiak <jakub@stasiak.at>, Tim Burke <tim.burke@gmail.com>, Nat Goodspeed <nat@lindenlab.com>, Itamar Turner-Trauring <itamar@itamarst.org>, Hervé Beraud <hberaud@redhat.com>
+License: MIT
+Location: /usr2/nandam/.local/lib/python3.10/site-packages
+Requires: dnspython, greenlet
+Required-by: 
+[2026-04-27T12:11:38Z] package install end

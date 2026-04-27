@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}Code Editor{% endblock %}
+
+{% block content %}
+<div class="editor-layout">
+  <style>
+    .mode-toggle-container {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .mode-pill {
+      position: relative;
+      display: flex;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 50px;
+      padding: 3px;
+      gap: 2px;
+    }
+    .pill-option {
+      position: relative;
+      z-index: 2;
+      background: transparent;
+      border: none;
+      color: rgba(255,255,255,0.45);
+      padding: 6px 18px;
+      border-radius: 50px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: color 0.25s ease;
+      white-space: nowrap;
+    }
+    .pill-option.active {
+      color: #fff;
+      font-weight: 700;
+    }
+    .pill-slider {
+      position: absolute;
+      top: 3px;
+      bottom: 3px;
+      border-radius: 50px;
+      background: linear-gradient(135deg, #7c3aed, #4f46e5);
+      box-shadow: 0 0 12px rgba(124,58,237,0.6);
+      transition: left 0.28s cubic-bezier(0.4,0,0.2,1), width 0.28s cubic-bezier(0.4,0,0.2,1);
+      z-index: 1;
+      pointer-events: none;
+    }
+    .mode-pill.agent-active .pill-slider {
+      background: linear-gradient(135deg, #059669, #10b981);
+      box-shadow: 0 0 12px rgba(16,185,129,0.6);
+    }
+    .mode-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+      transition: background 0.3s, box-shadow 0.3s;
+    }
+    .mode-dot.editor { background:#10b981; box-shadow:0 0 8px #10b981; }
+    .mode-dot.agent  { background:#7c3aed; box-shadow:0 0 8px #7c3aed; }
+    .editor-subtitle {
+      margin-left: 10px;
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+    .editor-center-wrap {
+      position: relative;
+    }
+    .editor-panel-dot {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      z-index: 5;
+    }
+  </style>
+  <div class="editor-toolbar-row">
+    <div class="path-switcher">
+      <input id="pathInput" class="input" value="{{ kernel_path }}">
+      <button id="browsePathBtn" class="btn-secondary">📂 Browse</button>
+      <button id="applyPathBtn" class="btn-primary">Apply</button>
+    </div>
+    <div class="editor-meta">
+      <div class="mode-toggle-container">
+        <div class="mode-pill" id="modePill">
+          <button class="pill-option" id="btnEditorMode" title="Standard Monaco editor - direct file editing">✏️ Editor Mode</button>
+          <button class="pill-option" id="btnAgentMode" title="QGenie Agent - AI-driven file operations">🤖 Agent Mode</button>
+          <div class="pill-slider" id="pillSlider"></div>
+        </div>
+        <span class="mode-dot" id="modeDot"></span>
+      </div>
+      <span id="pageSubtitle" class="editor-subtitle">Code Editor — ✏️ Editor Mode</span>
+      <span>Current file: <strong id="currentFile">(none)</strong></span>
+      <button id="saveFileBtn" class="btn-secondary">💾 Save</button>
+    </div>
+  </div>
+
+  {% if not kernel_exists %}
+  <div class="warn-banner">No kernel source found. Mount your kernel source at /app/kernel or change the path in Settings.</div>
+  {% endif %}
+
+  <div id="editorSplit" class="split-wrap editor-split">
+    <aside id="editorLeftPanel" class="pane pane-left">
+      <div id="dropZone" class="drop-zone" data-dnd-events="dragover dragleave drop">Drop .c/.h/.dts/.dtsi or patch/log/text files here</div>
+      <!-- dragover -->
+      <!-- dragleave -->
+      <!-- drop -->
+      <div class="upload-row">
+        <input id="fileInput" class="file-input" type="file" multiple>
+      </div>
+      <div id="fileTree" class="file-tree"></div>
+    </aside>
+    <div id="editorHandleLeft" class="resize-handle" title="Resize panels"></div>
+
+    <section id="editorCenterPanel" class="pane pane-center editor-center-wrap">
+      <span class="mode-dot editor editor-panel-dot" id="modeDotPanel"></span>
+      <div id="editorPane" class="editor-pane"></div>
+      <div id="diffPanel" class="diff-panel" style="display:none;">
+        <div class="diff-toolbar">
+          <span id="diffFilename">(diff)</span>
+          <span class="small-muted">Original (left) | Proposed (right)</span>
+          <button id="acceptDiffBtn" class="btn-primary">✅ Accept Changes</button>
+          <button id="rejectDiffBtn" class="btn-secondary">❌ Reject</button>
+          <button id="saveDiffBtn" class="btn-secondary">💾 Save to File</button>
+        </div>
+        <div id="diffEditor" class="diff-editor"></div>
+      </div>
+      <div id="terminalPane" class="terminal-pane terminal-panel xterm-panel"></div>
+    </section>
+    <div id="editorHandleRight" class="resize-handle" title="Resize panels"></div>
+
+    <aside id="editorRightPanel" class="pane pane-right terminal-panel">
+      <div class="chat-header-row">
+        <div class="model-row">
+          <label>Model</label>
+          <select id="modelSelect" class="input small">
+            {% for model in models %}
+            <option value="{{ model }}" {% if model == default_model %}selected{% endif %}>{{ model }} {{ model_metadata.get(model, {}).get('badge', '') }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <span class="small-muted">Session: <span id="editorSessionLabel">initializing...</span></span>
+      </div>
+
+      <div id="stepCards" class="step-cards"></div>
+      <div id="chatMessages" class="chat-messages"></div>
+      <div id="attachPills" class="attach-pills"></div>
+      <div class="chat-input-row">
+        <textarea id="chatInput" class="input" rows="3" placeholder="Ask QGenie or use Monaco right-click: Ask QGenie"></textarea>
+        <button id="sendBtn" class="btn-primary">Ask QGenie</button>
+      </div>
+    </aside>
+  </div>
+
+  <section class="panel" id="editorShellPanel">
+    <div class="chat-header-row">
+      <h3 style="margin:0;">🖥 Terminal</h3>
+      <button id="shellPanelToggle" class="btn-secondary" type="button">▼</button>
+    </div>
+    <div id="shellPanelBody" style="display:grid;gap:8px;margin-top:8px;">
+      <div class="chat-input-row">
+        <input id="shellCmdInput" class="input" placeholder="git log --oneline -3">
+        <button id="shellRunBtn" class="btn-primary" type="button">Run</button>
+      </div>
+      <div class="small-muted" id="shellStatus">Idle</div>
+      <pre id="shellOutput" class="terminal-pane" style="min-height:160px;max-height:260px;overflow:auto;padding:10px;"></pre>
+    </div>
+  </section>
+</div>
+{% include "components/folder_browser_modal.html" %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/terminal.js') }}"></script>
+<script src="{{ url_for('static', filename='js/diff_viewer.js') }}"></script>
+<script src="{{ url_for('static', filename='js/folder_browser.js') }}"></script>
+<script src="{{ url_for('static', filename='js/editor.js') }}"></script>
+<script>
+  window.addEventListener('DOMContentLoaded', function () {
+    if (window.ResizablePanel) {
+      new ResizablePanel('#editorSplit', [
+        { handleId: 'editorHandleLeft', leftPanelId: 'editorLeftPanel', rightPanelId: 'editorCenterPanel', minLeftWidth: 240, minRightWidth: 420 },
+        { handleId: 'editorHandleRight', leftPanelId: 'editorCenterPanel', rightPanelId: 'editorRightPanel', minLeftWidth: 420, minRightWidth: 300 },
+      ]);
+    }
+    window.AKDWEditor.init({
+      sessionId: 'sess-editor-default',
+      defaultModel: '{{ default_model }}',
+      defaultPath: '{{ kernel_path }}',
+    });
+  });
+</script>
+{% endblock %}
