@@ -1,194 +1,135 @@
 {% extends "base.html" %}
-{% block title %}Code Editor{% endblock %}
+{% block title %}Terminal IDE{% endblock %}
+
+{% block head %}
+{{ super() }}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/terminal/akdw_terminal.css') }}">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css"/>
+{% endblock %}
 
 {% block content %}
-<div class="editor-layout">
-  <style>
-    .mode-toggle-container {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .mode-pill {
-      position: relative;
-      display: flex;
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 50px;
-      padding: 3px;
-      gap: 2px;
-    }
-    .pill-option {
-      position: relative;
-      z-index: 2;
-      background: transparent;
-      border: none;
-      color: rgba(255,255,255,0.45);
-      padding: 6px 18px;
-      border-radius: 50px;
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: color 0.25s ease;
-      white-space: nowrap;
-    }
-    .pill-option.active {
-      color: #fff;
-      font-weight: 700;
-    }
-    .pill-slider {
-      position: absolute;
-      top: 3px;
-      bottom: 3px;
-      border-radius: 50px;
-      background: linear-gradient(135deg, #7c3aed, #4f46e5);
-      box-shadow: 0 0 12px rgba(124,58,237,0.6);
-      transition: left 0.28s cubic-bezier(0.4,0,0.2,1), width 0.28s cubic-bezier(0.4,0,0.2,1);
-      z-index: 1;
-      pointer-events: none;
-    }
-    .mode-pill.agent-active .pill-slider {
-      background: linear-gradient(135deg, #059669, #10b981);
-      box-shadow: 0 0 12px rgba(16,185,129,0.6);
-    }
-    .mode-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      display: inline-block;
-      transition: background 0.3s, box-shadow 0.3s;
-    }
-    .mode-dot.editor { background:#10b981; box-shadow:0 0 8px #10b981; }
-    .mode-dot.agent  { background:#7c3aed; box-shadow:0 0 8px #7c3aed; }
-    .editor-subtitle {
-      margin-left: 10px;
-      color: var(--text-muted);
-      font-size: 12px;
-    }
-    .editor-center-wrap {
-      position: relative;
-    }
-    .editor-panel-dot {
-      position: absolute;
-      top: 8px;
-      right: 8px;
-      z-index: 5;
-    }
-  </style>
-  <div class="editor-toolbar-row">
-    <div class="path-switcher">
-      <input id="pathInput" class="input" value="{{ kernel_path }}">
-      <button id="browsePathBtn" class="btn-secondary">📂 Browse</button>
-      <button id="applyPathBtn" class="btn-primary">Apply</button>
+
+<div id="connectModal" class="akdw-modal-overlay hidden">
+  <div class="akdw-modal">
+    <div class="akdw-modal-header">
+      <span>Connect to Remote Host</span>
+      <button onclick="closeConnectModal()" class="modal-close">X</button>
     </div>
-    <div class="editor-meta">
-      <div class="mode-toggle-container">
-        <div class="mode-pill" id="modePill">
-          <button class="pill-option" id="btnEditorMode" title="Standard Monaco editor - direct file editing">✏️ Editor Mode</button>
-          <button class="pill-option" id="btnAgentMode" title="QGenie Agent - AI-driven file operations">🤖 Agent Mode</button>
-          <div class="pill-slider" id="pillSlider"></div>
-        </div>
-        <span class="mode-dot" id="modeDot"></span>
+    <div class="akdw-modal-body">
+      <label>Hostname / IP</label>
+      <input id="ssh-hostname" type="text" value="hu-nandam-hyd"
+             placeholder="hu-nandam-hyd or 10.0.0.1" class="akdw-input"/>
+
+      <label>Port</label>
+      <input id="ssh-port" type="number" value="22" class="akdw-input"/>
+
+      <label>Username</label>
+      <input id="ssh-username" type="text" value="nandam" class="akdw-input"/>
+
+      <label>Password <span class="hint">(primary)</span></label>
+      <input id="ssh-password" type="password"
+             placeholder="Enter your password" class="akdw-input"/>
+
+      <details class="ssh-advanced">
+        <summary>Advanced (SSH Key)</summary>
+        <label>SSH Key Path <span class="hint">(optional fallback)</span></label>
+        <input id="ssh-keypath" type="text"
+               value="~/.ssh/id_rsa" class="akdw-input"/>
+      </details>
+
+      <div class="modal-actions">
+        <button onclick="closeConnectModal()" class="btn-secondary">Cancel</button>
+        <button onclick="doConnect()" class="btn-primary">Connect</button>
       </div>
-      <span id="pageSubtitle" class="editor-subtitle">Code Editor — ✏️ Editor Mode</span>
-      <span>Current file: <strong id="currentFile">(none)</strong></span>
-      <button id="saveFileBtn" class="btn-secondary">💾 Save</button>
+      <div id="connect-status" class="connect-status hidden"></div>
     </div>
   </div>
-
-  {% if not kernel_exists %}
-  <div class="warn-banner">No kernel source found. Mount your kernel source at /app/kernel or change the path in Settings.</div>
-  {% endif %}
-
-  <div id="editorSplit" class="split-wrap editor-split">
-    <aside id="editorLeftPanel" class="pane pane-left">
-      <div id="dropZone" class="drop-zone" data-dnd-events="dragover dragleave drop">Drop .c/.h/.dts/.dtsi or patch/log/text files here</div>
-      <!-- dragover -->
-      <!-- dragleave -->
-      <!-- drop -->
-      <div class="upload-row">
-        <input id="fileInput" class="file-input" type="file" multiple>
-      </div>
-      <div id="fileTree" class="file-tree"></div>
-    </aside>
-    <div id="editorHandleLeft" class="resize-handle" title="Resize panels"></div>
-
-    <section id="editorCenterPanel" class="pane pane-center editor-center-wrap">
-      <span class="mode-dot editor editor-panel-dot" id="modeDotPanel"></span>
-      <div id="editorPane" class="editor-pane"></div>
-      <div id="diffPanel" class="diff-panel" style="display:none;">
-        <div class="diff-toolbar">
-          <span id="diffFilename">(diff)</span>
-          <span class="small-muted">Original (left) | Proposed (right)</span>
-          <button id="acceptDiffBtn" class="btn-primary">✅ Accept Changes</button>
-          <button id="rejectDiffBtn" class="btn-secondary">❌ Reject</button>
-          <button id="saveDiffBtn" class="btn-secondary">💾 Save to File</button>
-        </div>
-        <div id="diffEditor" class="diff-editor"></div>
-      </div>
-      <div id="terminalPane" class="terminal-pane terminal-panel xterm-panel"></div>
-    </section>
-    <div id="editorHandleRight" class="resize-handle" title="Resize panels"></div>
-
-    <aside id="editorRightPanel" class="pane pane-right terminal-panel">
-      <div class="chat-header-row">
-        <div class="model-row">
-          <label>Model</label>
-          <select id="modelSelect" class="input small">
-            {% for model in models %}
-            <option value="{{ model }}" {% if model == default_model %}selected{% endif %}>{{ model }} {{ model_metadata.get(model, {}).get('badge', '') }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <span class="small-muted">Session: <span id="editorSessionLabel">initializing...</span></span>
-      </div>
-
-      <div id="stepCards" class="step-cards"></div>
-      <div id="chatMessages" class="chat-messages"></div>
-      <div id="attachPills" class="attach-pills"></div>
-      <div class="chat-input-row">
-        <textarea id="chatInput" class="input" rows="3" placeholder="Ask QGenie or use Monaco right-click: Ask QGenie"></textarea>
-        <button id="sendBtn" class="btn-primary">Ask QGenie</button>
-      </div>
-    </aside>
-  </div>
-
-  <section class="panel" id="editorShellPanel">
-    <div class="chat-header-row">
-      <h3 style="margin:0;">🖥 Terminal</h3>
-      <button id="shellPanelToggle" class="btn-secondary" type="button">▼</button>
-    </div>
-    <div id="shellPanelBody" style="display:grid;gap:8px;margin-top:8px;">
-      <div class="chat-input-row">
-        <input id="shellCmdInput" class="input" placeholder="git log --oneline -3">
-        <button id="shellRunBtn" class="btn-primary" type="button">Run</button>
-      </div>
-      <div class="small-muted" id="shellStatus">Idle</div>
-      <pre id="shellOutput" class="terminal-pane" style="min-height:160px;max-height:260px;overflow:auto;padding:10px;"></pre>
-    </div>
-  </section>
 </div>
-{% include "components/folder_browser_modal.html" %}
+
+<div class="terminal-ide-root" id="terminalRoot">
+
+  <div class="hosts-sidebar" id="hostsSidebar">
+    <div class="sidebar-header">
+      <span>Saved Hosts</span>
+      <button onclick="toggleHostsSidebar()" class="sidebar-toggle" title="Collapse">&lt;</button>
+    </div>
+    <div id="hostsList" class="hosts-list">
+      <div class="host-loading">Loading hosts...</div>
+    </div>
+    <button class="btn-add-host" onclick="openConnectModal()">+ New Session</button>
+  </div>
+
+  <button id="sidebarExpandBtn" class="sidebar-expand-btn hidden"
+          onclick="toggleHostsSidebar()" title="Show Hosts">&gt;</button>
+
+  <div class="terminal-main" id="terminalMain">
+    <div class="terminal-tabbar" id="terminalTabbar">
+      <button class="tab-new-btn" onclick="openConnectModal()" title="New Session">+</button>
+      <div id="tabsList" class="tabs-list">
+        <div class="no-sessions-hint">
+          Click <strong>+ New Session</strong> or a saved host to connect
+        </div>
+      </div>
+    </div>
+
+    <div class="terminal-area" id="terminalArea">
+      <div id="terminalWelcome" class="terminal-welcome">
+        <div class="welcome-logo">AKDW Terminal</div>
+        <div class="welcome-sub">Audio Kernel Driver Workbench - Phase 6</div>
+        <div class="welcome-actions">
+          <button onclick="openConnectModal()" class="btn-primary btn-large">Connect to Dev-Compute</button>
+        </div>
+        <div class="welcome-quick">
+          <span class="quick-label">Quick connect:</span>
+          <button onclick="quickConnect('hu-nandam-hyd')" class="btn-quick">hu-nandam-hyd</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="qgenie-drawer collapsed" id="qgenieDrawer">
+    <div class="drawer-header">
+      <span>QGenie Assistant</span>
+      <button onclick="toggleQGenieDrawer()" class="drawer-close" title="Collapse">&gt;</button>
+    </div>
+    <div class="drawer-body" id="drawerBody">
+      <div id="drawerMessages" class="drawer-messages"></div>
+      <div class="drawer-input-row">
+        <textarea id="drawerInput" class="drawer-input"
+                  placeholder="Ask QGenie about your code..."
+                  rows="3"
+                  onkeydown="handleDrawerKey(event)"></textarea>
+        <button onclick="sendDrawerMessage()" class="drawer-send">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <button id="qgenieToggleBtn" class="qgenie-toggle-btn"
+          onclick="toggleQGenieDrawer()" title="Open QGenie">AI</button>
+
+</div>
+
+<div class="terminal-status-bar" id="statusBar">
+  <span id="statusHost" class="status-item status-host">Not connected</span>
+  <span class="status-divider">|</span>
+  <span id="statusPath" class="status-item">~</span>
+  <span class="status-divider">|</span>
+  <span id="statusBranch" class="status-item">branch: -</span>
+  <span class="status-divider">|</span>
+  <span id="statusModel" class="status-item">model: claude-sonnet-4</span>
+  <span class="status-divider">|</span>
+  <span id="statusSessions" class="status-item">0 sessions</span>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/terminal.js') }}"></script>
-<script src="{{ url_for('static', filename='js/diff_viewer.js') }}"></script>
-<script src="{{ url_for('static', filename='js/folder_browser.js') }}"></script>
-<script src="{{ url_for('static', filename='js/editor.js') }}"></script>
-<script>
-  window.addEventListener('DOMContentLoaded', function () {
-    if (window.ResizablePanel) {
-      new ResizablePanel('#editorSplit', [
-        { handleId: 'editorHandleLeft', leftPanelId: 'editorLeftPanel', rightPanelId: 'editorCenterPanel' },
-        { handleId: 'editorHandleRight', leftPanelId: 'editorCenterPanel', rightPanelId: 'editorRightPanel' },
-      ]);
-    }
-    window.AKDWEditor.init({
-      sessionId: 'sess-editor-default',
-      defaultModel: '{{ default_model }}',
-      defaultPath: '{{ kernel_path }}',
-    });
-  });
-</script>
+{{ super() }}
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+<script src="{{ url_for('static', filename='js/terminal/akdw_terminal.js') }}"></script>
+<script src="{{ url_for('static', filename='js/terminal/akdw_sessions.js') }}"></script>
+<script src="{{ url_for('static', filename='js/terminal/akdw_qgenie_drawer.js') }}"></script>
 {% endblock %}
