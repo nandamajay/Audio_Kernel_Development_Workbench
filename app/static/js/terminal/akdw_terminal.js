@@ -9,6 +9,11 @@ const AKDW_Terminal = (() => {
   let socket = null;
   let activeSessionId = null;
 
+  const MIN_FONT_SIZE = 10;
+  const MAX_FONT_SIZE = 24;
+  const FONT_STORAGE_KEY = 'akdw_terminal_font_size';
+  let currentFontSize = readStoredFontSize();
+
   const MOBATERM_THEME = {
     background: '#0D1117',
     foreground: '#E6EDF3',
@@ -35,6 +40,7 @@ const AKDW_Terminal = (() => {
 
   function initSocket() {
     if (socket) return socket;
+
     socket = io({
       transports: ['websocket', 'polling'],
       reconnection: true,
@@ -60,9 +66,10 @@ const AKDW_Terminal = (() => {
       if (window.AKDW_Sessions) {
         AKDW_Sessions.onConnected(session_id, hostname);
       }
+
       const status = document.getElementById('connect-status');
       if (status) {
-        status.textContent = message || `Connected to ${username}@${hostname}`;
+        status.textContent = message || 'Connected to ' + username + '@' + hostname;
         status.className = 'connect-status info';
         status.classList.remove('hidden');
       }
@@ -70,6 +77,7 @@ const AKDW_Terminal = (() => {
     });
 
     socket.on('terminal_closed', ({ session_id, message }) => {
+      clearPendingConnect(session_id);
       const t = terminals[session_id];
       if (t) {
         t.term.writeln('\r\n\x1b[33m[Session closed: ' + (message || 'Disconnected') + ']\x1b[0m\r\n');
@@ -81,15 +89,16 @@ const AKDW_Terminal = (() => {
 
     socket.on('terminal_error', ({ session_id, message }) => {
       clearPendingConnect(session_id);
+      const errorMessage = message || 'Unknown error';
       const t = terminals[session_id];
       if (t) {
-        t.term.writeln('\r\n\x1b[31mError: ' + (message || 'Unknown error') + '\x1b[0m\r\n');
-      } else {
-        showConnectError(message || 'Unknown error');
+        t.term.writeln('\r\n\x1b[31mError: ' + errorMessage + '\x1b[0m\r\n');
       }
+      showConnectError(errorMessage);
       if (window.AKDW_Sessions) {
-        AKDW_Sessions.onError(session_id, message || 'Unknown error');
+        AKDW_Sessions.onError(session_id, errorMessage);
       }
+
       const modal = document.getElementById('connectModal');
       if (modal && modal.classList.contains('hidden')) {
         modal.classList.remove('hidden');
@@ -99,13 +108,14 @@ const AKDW_Terminal = (() => {
     return socket;
   }
 
-  function createTerminal(sessionId) {
+  function createTerminal(sessionId, options = {}) {
     initSocket();
+    if (terminals[sessionId]) return terminals[sessionId];
 
     const term = new Terminal({
       theme: MOBATERM_THEME,
       fontFamily: '"Cascadia Code", "Fira Code", "JetBrains Mono", monospace',
-      fontSize: 13,
+      fontSize: currentFontSize,
       lineHeight: 1.2,
       cursorBlink: true,
       cursorStyle: 'block',
@@ -116,16 +126,16 @@ const AKDW_Terminal = (() => {
 
     const FitCtor = (window.FitAddon && window.FitAddon.FitAddon) ? window.FitAddon.FitAddon : null;
     const fitAddon = FitCtor ? new FitCtor() : null;
-    if (fitAddon) {
-      term.loadAddon(fitAddon);
-    }
+    if (fitAddon) term.loadAddon(fitAddon);
 
     const el = document.createElement('div');
     el.id = 'term-' + sessionId;
     el.className = 'xterm-instance hidden';
     el.style.width = '100%';
     el.style.height = '100%';
-    document.getElementById('terminalArea').appendChild(el);
+
+    const terminalArea = document.getElementById('terminalArea');
+    if (terminalArea) terminalArea.appendChild(el);
 
     term.open(el);
     if (fitAddon) fitAddon.fit();
@@ -141,22 +151,29 @@ const AKDW_Terminal = (() => {
     socket.emit('terminal_join', { session_id: sessionId });
 
     terminals[sessionId] = { term, fitAddon, el };
+
+    if (options.reattach) {
+      term.writeln('\x1b[36m[Reattached to active session ' + sessionId + ']\x1b[0m');
+      term.writeln('Press Enter if prompt is not visible.');
+    }
+
     return terminals[sessionId];
   }
 
   function connectSession(sessionId, connectionData) {
     createTerminal(sessionId);
     showSession(sessionId);
+
+    clearPendingConnect(sessionId);
     pendingConnectTimers[sessionId] = window.setTimeout(() => {
       const t = terminals[sessionId];
       if (t) {
         t.term.writeln('\r\n\x1b[33mConnection timeout waiting for SSH response.\x1b[0m\r\n');
       }
       showConnectError('Connection timeout. Check credentials, host reachability, and Socket.IO transport.');
-      if (window.AKDW_Sessions) {
-        AKDW_Sessions.onError(sessionId, 'Connection timeout');
-      }
+      if (window.AKDW_Sessions) AKDW_Sessions.onError(sessionId, 'Connection timeout');
     }, 15000);
+
     socket.emit('terminal_connect', {
       session_id: sessionId,
       hostname: connectionData.hostname,
@@ -165,6 +182,13 @@ const AKDW_Terminal = (() => {
       password: connectionData.password,
       key_path: connectionData.key_path || null
     });
+  }
+
+  function attachSession(sessionId, meta = {}) {
+    createTerminal(sessionId, { reattach: true });
+    if (meta.hostname) {
+      updateStatusBar(sessionId, meta.hostname, meta.username || '');
+    }
   }
 
   function showSession(sessionId) {
@@ -188,17 +212,18 @@ const AKDW_Terminal = (() => {
     if (t) {
       try {
         t.term.dispose();
-      } catch (err) {
+      } catch (_err) {
         // no-op
       }
       t.el.remove();
       delete terminals[sessionId];
     }
 
+    clearPendingConnect(sessionId);
+
     if (socket) {
       socket.emit('terminal_disconnect_session', { session_id: sessionId });
     }
-    clearPendingConnect(sessionId);
 
     const remaining = Object.keys(terminals);
     if (remaining.length > 0) {
@@ -206,8 +231,10 @@ const AKDW_Terminal = (() => {
     } else {
       showWelcomeScreen();
       activeSessionId = null;
-      document.getElementById('statusHost').textContent = 'Not connected';
-      document.getElementById('statusPath').textContent = '~';
+      const host = document.getElementById('statusHost');
+      const path = document.getElementById('statusPath');
+      if (host) host.textContent = 'Not connected';
+      if (path) path.textContent = '~';
     }
     updateSessionCount();
   }
@@ -218,7 +245,7 @@ const AKDW_Terminal = (() => {
       if (!t || !t.fitAddon) return;
       try {
         t.fitAddon.fit();
-      } catch (err) {
+      } catch (_err) {
         // no-op
       }
     });
@@ -242,18 +269,10 @@ const AKDW_Terminal = (() => {
     statusEl.classList.remove('hidden');
   }
 
-  function clearPendingConnect(sessionId) {
-    const timer = pendingConnectTimers[sessionId];
-    if (timer) {
-      window.clearTimeout(timer);
-      delete pendingConnectTimers[sessionId];
-    }
-  }
-
   function updateStatusBar(sessionId, hostname) {
     const hostEl = document.getElementById('statusHost');
     if (hostEl) {
-      hostEl.textContent = 'Connected: ' + hostname;
+      hostEl.textContent = 'Connected: ' + (hostname || 'host');
       hostEl.className = 'status-item status-host connected';
     }
     activeSessionId = sessionId;
@@ -273,22 +292,90 @@ const AKDW_Terminal = (() => {
 
     const pathMatch = data.match(/:[ ]*(~[^\n\r$#>]*|\/[^\n\r$#>]*)[$#>]/);
     if (pathMatch) {
-      document.getElementById('statusPath').textContent = pathMatch[1].trim();
+      const path = document.getElementById('statusPath');
+      if (path) path.textContent = pathMatch[1].trim();
     }
 
     const gitMatch = data.match(/\(([^)]+)\)\s*[$#>]/);
     if (gitMatch) {
-      document.getElementById('statusBranch').textContent = 'branch: ' + gitMatch[1].trim();
+      const branch = document.getElementById('statusBranch');
+      if (branch) branch.textContent = 'branch: ' + gitMatch[1].trim();
     }
+  }
+
+  function clearPendingConnect(sessionId) {
+    const timer = pendingConnectTimers[sessionId];
+    if (timer) {
+      window.clearTimeout(timer);
+      delete pendingConnectTimers[sessionId];
+    }
+  }
+
+  function hasSession(sessionId) {
+    return Boolean(terminals[sessionId]);
+  }
+
+  function generateSessionId() {
+    let candidate = '';
+    do {
+      candidate = 'sess-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+    } while (hasSession(candidate));
+    return candidate;
+  }
+
+  function readStoredFontSize() {
+    const raw = window.localStorage.getItem(FONT_STORAGE_KEY);
+    const parsed = parseInt(raw || '13', 10);
+    if (Number.isNaN(parsed)) return 13;
+    return Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, parsed));
+  }
+
+  function setFontSize(size) {
+    const next = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, size));
+    currentFontSize = next;
+    window.localStorage.setItem(FONT_STORAGE_KEY, String(next));
+
+    Object.keys(terminals).forEach((sid) => {
+      const t = terminals[sid];
+      if (!t) return;
+      t.term.options.fontSize = next;
+      if (t.fitAddon) {
+        try {
+          t.fitAddon.fit();
+        } catch (_err) {
+          // no-op
+        }
+      }
+    });
+
+    const label = document.getElementById('fontSizeValue');
+    if (label) label.textContent = String(next);
+  }
+
+  function adjustFontSize(delta) {
+    setFontSize(currentFontSize + delta);
+  }
+
+  function bootSessionUi() {
+    if (window.AKDW_Sessions && typeof AKDW_Sessions.initialize === 'function') {
+      AKDW_Sessions.initialize();
+      return;
+    }
+    window.setTimeout(bootSessionUi, 120);
   }
 
   window.addEventListener('resize', resizeAll);
 
   return {
     connectSession,
+    attachSession,
     showSession,
     closeSession,
     resizeAll,
+    hasSession,
+    generateSessionId,
+    setFontSize,
+    adjustFontSize,
     getActive: () => activeSessionId,
     getTerminals: () => terminals
   };
@@ -332,7 +419,7 @@ function doConnect() {
   status.className = 'connect-status info';
   status.classList.remove('hidden');
 
-  const sessionId = 'sess-' + Math.random().toString(36).slice(2, 10);
+  const sessionId = AKDW_Terminal.generateSessionId();
   if (window.AKDW_Sessions) {
     AKDW_Sessions.addTab(sessionId, hostname);
     AKDW_Sessions.saveCurrentHost(hostname, port, username, hostname);
@@ -360,8 +447,29 @@ function toggleHostsSidebar() {
   AKDW_Terminal.resizeAll();
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  if (window.AKDW_Sessions) {
+function refreshHostsList() {
+  if (window.AKDW_Sessions && typeof AKDW_Sessions.loadSavedHosts === 'function') {
     AKDW_Sessions.loadSavedHosts();
+  }
+}
+
+function increaseTerminalFont() {
+  AKDW_Terminal.adjustFontSize(1);
+}
+
+function decreaseTerminalFont() {
+  AKDW_Terminal.adjustFontSize(-1);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  AKDW_Terminal.setFontSize(parseInt(window.localStorage.getItem('akdw_terminal_font_size') || '13', 10));
+  if (window.AKDW_Sessions && typeof AKDW_Sessions.initialize === 'function') {
+    AKDW_Sessions.initialize();
+  } else {
+    window.setTimeout(() => {
+      if (window.AKDW_Sessions && typeof AKDW_Sessions.initialize === 'function') {
+        AKDW_Sessions.initialize();
+      }
+    }, 200);
   }
 });

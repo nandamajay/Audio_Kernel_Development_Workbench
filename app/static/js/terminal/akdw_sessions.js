@@ -6,14 +6,21 @@
 const AKDW_Sessions = (() => {
   let tabCounter = 0;
   const tabs = {};
+  let initialized = false;
 
-  function addTab(sessionId, hostname) {
+  function addTab(sessionId, hostname, options = {}) {
+    if (!sessionId) return null;
+    if (tabs[sessionId]) {
+      if (options.activate !== false) activateTab(sessionId);
+      return tabs[sessionId];
+    }
+
     tabCounter += 1;
     const tabNumber = tabCounter;
-    const label = tabNumber + '. ' + hostname;
+    const label = tabNumber + '. ' + (hostname || 'session');
 
     const tabEl = document.createElement('div');
-    tabEl.className = 'terminal-tab connecting';
+    tabEl.className = 'terminal-tab';
     tabEl.dataset.sessionId = sessionId;
     tabEl.innerHTML = [
       '<span class="tab-status-dot">...</span>',
@@ -25,7 +32,6 @@ const AKDW_Sessions = (() => {
     tabEl.querySelector('.tab-close').addEventListener('click', (event) => {
       closeTab(sessionId, event);
     });
-
     tabEl.addEventListener('click', (event) => {
       if (event.target.classList.contains('tab-close')) return;
       activateTab(sessionId);
@@ -34,15 +40,27 @@ const AKDW_Sessions = (() => {
     const hint = document.querySelector('.no-sessions-hint');
     if (hint) hint.remove();
 
-    document.getElementById('tabsList').appendChild(tabEl);
+    const tabsList = document.getElementById('tabsList');
+    if (tabsList) tabsList.appendChild(tabEl);
+
     tabs[sessionId] = {
       tabEl,
-      hostname,
+      hostname: hostname || 'session',
       number: tabNumber,
       status: 'connecting'
     };
 
-    activateTab(sessionId);
+    setTabState(sessionId, options.status || 'connecting');
+
+    if (options.activate !== false) {
+      activateTab(sessionId);
+    }
+
+    return tabs[sessionId];
+  }
+
+  function hasTab(sessionId) {
+    return Boolean(tabs[sessionId]);
   }
 
   function activateTab(sessionId) {
@@ -68,48 +86,58 @@ const AKDW_Sessions = (() => {
     AKDW_Terminal.closeSession(sessionId);
 
     if (Object.keys(tabs).length === 0) {
-      document.getElementById('tabsList').innerHTML =
-        '<div class="no-sessions-hint">Click <strong>+ New Session</strong> or a saved host to connect</div>';
+      const tabsList = document.getElementById('tabsList');
+      if (tabsList) {
+        tabsList.innerHTML = '<div class="no-sessions-hint">Click <strong>+ New Session</strong> or a saved host to connect</div>';
+      }
     }
   }
 
   function onConnected(sessionId) {
-    const tab = tabs[sessionId];
-    if (!tab) return;
-    tab.status = 'connected';
-    tab.tabEl.classList.remove('connecting', 'error', 'disconnected');
-    tab.tabEl.classList.add('connected');
-    const dot = tab.tabEl.querySelector('.tab-status-dot');
-    if (dot) dot.textContent = 'o';
+    setTabState(sessionId, 'connected');
   }
 
   function onClosed(sessionId) {
-    const tab = tabs[sessionId];
-    if (!tab) return;
-    tab.status = 'closed';
-    tab.tabEl.classList.remove('connected', 'connecting', 'error');
-    tab.tabEl.classList.add('disconnected');
-    const dot = tab.tabEl.querySelector('.tab-status-dot');
-    if (dot) dot.textContent = '-';
+    setTabState(sessionId, 'disconnected');
   }
 
   function onError(sessionId) {
+    setTabState(sessionId, 'error');
+  }
+
+  function setTabState(sessionId, state) {
     const tab = tabs[sessionId];
     if (!tab) return;
-    tab.status = 'error';
-    tab.tabEl.classList.remove('connected', 'connecting', 'disconnected');
-    tab.tabEl.classList.add('error');
+
+    tab.status = state;
+    tab.tabEl.classList.remove('connected', 'connecting', 'disconnected', 'error');
+    tab.tabEl.classList.add(state);
+
     const dot = tab.tabEl.querySelector('.tab-status-dot');
-    if (dot) dot.textContent = '!';
+    if (!dot) return;
+    if (state === 'connected') dot.textContent = 'o';
+    else if (state === 'connecting') dot.textContent = '...';
+    else if (state === 'disconnected') dot.textContent = '-';
+    else if (state === 'error') dot.textContent = '!';
   }
 
   async function loadSavedHosts() {
+    const container = document.getElementById('hostsList');
+    if (container && container.innerHTML.indexOf('host-item') === -1) {
+      container.innerHTML = '<div class="host-loading">Loading hosts...</div>';
+    }
+
     try {
-      const resp = await fetch('/api/terminal/hosts');
+      const resp = await fetch('/api/terminal/hosts', { cache: 'no-store' });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+      if (contentType.indexOf('application/json') === -1) {
+        throw new Error('Non-JSON response (possible setup redirect/session timeout)');
+      }
       const data = await resp.json();
-      renderHostsList(data.hosts || []);
+      renderHostsList(Array.isArray(data.hosts) ? data.hosts : []);
     } catch (err) {
-      renderHostsList([]);
+      renderHostsError(err && err.message ? err.message : 'Failed to load saved hosts');
     }
   }
 
@@ -136,12 +164,15 @@ const AKDW_Sessions = (() => {
 
       const details = document.createElement('div');
       details.className = 'host-details';
+
       const label = document.createElement('span');
       label.className = 'host-label';
       label.textContent = h.label || h.hostname;
+
       const sub = document.createElement('span');
       sub.className = 'host-sub';
       sub.textContent = (h.username || '') + '@' + h.hostname + ':' + String(h.port || 22);
+
       details.appendChild(label);
       details.appendChild(sub);
 
@@ -158,6 +189,41 @@ const AKDW_Sessions = (() => {
     });
   }
 
+  function renderHostsError(message) {
+    const container = document.getElementById('hostsList');
+    if (!container) return;
+    container.innerHTML = [
+      '<div class="hosts-error">',
+      '<div class="hosts-error-title">Could not load hosts</div>',
+      '<div class="hosts-error-msg">' + escapeHtml(message) + '</div>',
+      '<button class="btn-secondary hosts-retry" onclick="refreshHostsList()">Retry</button>',
+      '</div>'
+    ].join('');
+  }
+
+  async function restoreActiveSessions() {
+    try {
+      const resp = await fetch('/api/terminal/sessions', { cache: 'no-store' });
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+      const active = sessions.filter((s) => Boolean(s.active));
+      if (!active.length) return;
+
+      active.forEach((s, idx) => {
+        const sid = s.session_id;
+        const host = s.hostname || 'session';
+        addTab(sid, host, { status: 'connected', activate: idx === active.length - 1 });
+        AKDW_Terminal.attachSession(sid, {
+          hostname: s.hostname || '',
+          username: s.username || ''
+        });
+      });
+    } catch (_err) {
+      // no-op
+    }
+  }
+
   async function deleteHost(hostId, event) {
     if (event) event.stopPropagation();
     await fetch('/api/terminal/hosts/' + encodeURIComponent(hostId), { method: 'DELETE' });
@@ -172,20 +238,51 @@ const AKDW_Sessions = (() => {
         body: JSON.stringify({ hostname, port, username, label: label || hostname })
       });
       loadSavedHosts();
-    } catch (err) {
+    } catch (_err) {
       // no-op
     }
   }
 
+  function initialize() {
+    if (initialized) return;
+    initialized = true;
+
+    loadSavedHosts();
+    restoreActiveSessions();
+
+    window.setInterval(() => {
+      loadSavedHosts();
+    }, 60000);
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        loadSavedHosts();
+        restoreActiveSessions();
+      }
+    });
+  }
+
+  function escapeHtml(text) {
+    return String(text || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   return {
     addTab,
+    hasTab,
     activateTab,
     closeTab,
     onConnected,
     onClosed,
     onError,
     loadSavedHosts,
-    saveCurrentHost
+    restoreActiveSessions,
+    saveCurrentHost,
+    initialize
   };
 })();
 

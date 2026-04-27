@@ -45,6 +45,11 @@
   border-bottom: 1px solid #21262D;
 }
 
+.sidebar-actions {
+  display: inline-flex;
+  gap: 4px;
+}
+
 .hosts-list {
   flex: 1;
   overflow-y: auto;
@@ -201,6 +206,37 @@
   align-items: center;
   gap: 2px;
   flex: 1;
+}
+
+.tab-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 6px;
+  padding-right: 4px;
+}
+
+.font-btn {
+  background: #21262D;
+  border: 1px solid #30363D;
+  color: #C9D1D9;
+  border-radius: 4px;
+  font-size: 11px;
+  min-width: 28px;
+  height: 24px;
+  cursor: pointer;
+}
+
+.font-btn:hover {
+  background: #30363D;
+  color: #FFFFFF;
+}
+
+.font-size-value {
+  min-width: 18px;
+  text-align: center;
+  color: #8B949E;
+  font-size: 11px;
 }
 
 .terminal-tab {
@@ -780,6 +816,32 @@
   color: #6E7681;
   padding: 16px 12px;
   text-align: center;
+}
+
+.hosts-error {
+  padding: 12px;
+  margin: 8px;
+  background: #2D1B1B;
+  border: 1px solid #FF7B7244;
+  color: #FFB4AE;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.hosts-error-title {
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.hosts-error-msg {
+  margin-bottom: 8px;
+  word-break: break-word;
+}
+
+.hosts-retry {
+  padding: 4px 10px;
+  font-size: 11px;
 }
 
 .host-loading {
