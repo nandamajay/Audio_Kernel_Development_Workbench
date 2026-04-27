@@ -5,6 +5,7 @@
 
 const AKDW_Terminal = (() => {
   const terminals = {};
+  const pendingConnectTimers = {};
   let socket = null;
   let activeSessionId = null;
 
@@ -34,7 +35,16 @@ const AKDW_Terminal = (() => {
 
   function initSocket() {
     if (socket) return socket;
-    socket = io({ transports: ['websocket'], reconnection: true });
+    socket = io({
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: 6,
+      timeout: 10000
+    });
+
+    socket.on('connect_error', (err) => {
+      showConnectError('Socket.IO connection failed: ' + ((err && err.message) || 'transport error'));
+    });
 
     socket.on('terminal_output', ({ session_id, data }) => {
       const t = terminals[session_id];
@@ -44,6 +54,7 @@ const AKDW_Terminal = (() => {
     });
 
     socket.on('terminal_connected', ({ session_id, hostname, username, message }) => {
+      clearPendingConnect(session_id);
       hideWelcomeScreen();
       updateStatusBar(session_id, hostname, username);
       if (window.AKDW_Sessions) {
@@ -55,6 +66,7 @@ const AKDW_Terminal = (() => {
         status.className = 'connect-status info';
         status.classList.remove('hidden');
       }
+      closeConnectModal();
     });
 
     socket.on('terminal_closed', ({ session_id, message }) => {
@@ -68,6 +80,7 @@ const AKDW_Terminal = (() => {
     });
 
     socket.on('terminal_error', ({ session_id, message }) => {
+      clearPendingConnect(session_id);
       const t = terminals[session_id];
       if (t) {
         t.term.writeln('\r\n\x1b[31mError: ' + (message || 'Unknown error') + '\x1b[0m\r\n');
@@ -76,6 +89,10 @@ const AKDW_Terminal = (() => {
       }
       if (window.AKDW_Sessions) {
         AKDW_Sessions.onError(session_id, message || 'Unknown error');
+      }
+      const modal = document.getElementById('connectModal');
+      if (modal && modal.classList.contains('hidden')) {
+        modal.classList.remove('hidden');
       }
     });
 
@@ -130,6 +147,16 @@ const AKDW_Terminal = (() => {
   function connectSession(sessionId, connectionData) {
     createTerminal(sessionId);
     showSession(sessionId);
+    pendingConnectTimers[sessionId] = window.setTimeout(() => {
+      const t = terminals[sessionId];
+      if (t) {
+        t.term.writeln('\r\n\x1b[33mConnection timeout waiting for SSH response.\x1b[0m\r\n');
+      }
+      showConnectError('Connection timeout. Check credentials, host reachability, and Socket.IO transport.');
+      if (window.AKDW_Sessions) {
+        AKDW_Sessions.onError(sessionId, 'Connection timeout');
+      }
+    }, 15000);
     socket.emit('terminal_connect', {
       session_id: sessionId,
       hostname: connectionData.hostname,
@@ -171,6 +198,7 @@ const AKDW_Terminal = (() => {
     if (socket) {
       socket.emit('terminal_disconnect_session', { session_id: sessionId });
     }
+    clearPendingConnect(sessionId);
 
     const remaining = Object.keys(terminals);
     if (remaining.length > 0) {
@@ -212,6 +240,14 @@ const AKDW_Terminal = (() => {
     statusEl.textContent = 'Error: ' + message;
     statusEl.className = 'connect-status error';
     statusEl.classList.remove('hidden');
+  }
+
+  function clearPendingConnect(sessionId) {
+    const timer = pendingConnectTimers[sessionId];
+    if (timer) {
+      window.clearTimeout(timer);
+      delete pendingConnectTimers[sessionId];
+    }
   }
 
   function updateStatusBar(sessionId, hostname) {
@@ -302,7 +338,6 @@ function doConnect() {
     AKDW_Sessions.saveCurrentHost(hostname, port, username, hostname);
   }
 
-  closeConnectModal();
   AKDW_Terminal.connectSession(sessionId, {
     hostname,
     port,
