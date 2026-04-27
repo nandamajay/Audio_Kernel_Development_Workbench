@@ -285,6 +285,7 @@ const AKDW_Sessions = (() => {
     initialize
   };
 })();
+window.AKDW_Sessions = AKDW_Sessions;
 
 async function deleteHost(hostId, event) {
   if (event) event.stopPropagation();

@@ -390,6 +390,7 @@ const AKDW_Terminal = (() => {
     readStoredFontSize
   };
 })();
+window.AKDW_Terminal = AKDW_Terminal;
 
 function openConnectModal(prefillHostname) {
   if (prefillHostname) {
@@ -474,8 +475,9 @@ function decreaseTerminalFont() {
 document.addEventListener('DOMContentLoaded', () => {
   AKDW_Terminal.setFontSize(AKDW_Terminal.readStoredFontSize());
   const tryInit = () => {
-    if (window.AKDW_Sessions && typeof AKDW_Sessions.initialize === 'function') {
-      AKDW_Sessions.initialize();
+    const mgr = (typeof AKDW_Sessions !== 'undefined' && AKDW_Sessions) || window.AKDW_Sessions;
+    if (mgr && typeof mgr.initialize === 'function') {
+      mgr.initialize();
       return;
     }
     window.setTimeout(tryInit, 120);

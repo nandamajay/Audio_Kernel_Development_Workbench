@@ -127,6 +127,7 @@ const AKDW_QGenie = (() => {
     sendDrawerMessage
   };
 })();
+window.AKDW_QGenie = AKDW_QGenie;
 
 function toggleQGenieDrawer() { AKDW_QGenie.toggleQGenieDrawer(); }
 function handleDrawerKey(event) { AKDW_QGenie.handleDrawerKey(event); }
