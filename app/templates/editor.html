@@ -3,7 +3,7 @@
 
 {% block head %}
 {{ super() }}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/terminal/akdw_terminal.css', v='20260427d') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/terminal/akdw_terminal.css', v='20260427e') }}">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css"/>
 {% endblock %}
 
@@ -137,7 +137,92 @@
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
-<script src="{{ url_for('static', filename='js/terminal/akdw_terminal.js', v='20260427d') }}"></script>
-<script src="{{ url_for('static', filename='js/terminal/akdw_sessions.js', v='20260427d') }}"></script>
-<script src="{{ url_for('static', filename='js/terminal/akdw_qgenie_drawer.js', v='20260427d') }}"></script>
+<script src="{{ url_for('static', filename='js/terminal/akdw_terminal.js', v='20260427e') }}"></script>
+<script src="{{ url_for('static', filename='js/terminal/akdw_sessions.js', v='20260427e') }}"></script>
+<script src="{{ url_for('static', filename='js/terminal/akdw_qgenie_drawer.js', v='20260427e') }}"></script>
+<script>
+  (function () {
+    function esc(s) {
+      return String(s || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function showInitError(message) {
+      var el = document.getElementById("hostsList");
+      if (!el) return;
+      el.innerHTML = [
+        '<div class="hosts-error">',
+        '<div class="hosts-error-title">Terminal UI init issue</div>',
+        '<div class="hosts-error-msg">' + esc(message) + '</div>',
+        '<button class="btn-secondary hosts-retry" onclick="window.location.reload()">Reload</button>',
+        '</div>'
+      ].join("");
+    }
+
+    function renderHostsFallback(hosts) {
+      var el = document.getElementById("hostsList");
+      if (!el) return;
+      if (!Array.isArray(hosts) || hosts.length === 0) {
+        el.innerHTML = '<div class="no-hosts-hint">No saved hosts yet.<br/>Click + New Session to add one.</div>';
+        return;
+      }
+
+      el.innerHTML = hosts.map(function (h) {
+        var host = esc(h.hostname || "");
+        var label = esc(h.label || h.hostname || "");
+        var user = esc(h.username || "");
+        var port = Number(h.port || 22);
+        return [
+          '<div class="host-item" onclick="quickConnect(\'' + host + '\')" title="Connect to ' + host + '">',
+          '<span class="host-icon">&gt;</span>',
+          '<div class="host-details">',
+          '<span class="host-label">' + label + '</span>',
+          '<span class="host-sub">' + user + '@' + host + ':' + port + '</span>',
+          '</div>',
+          '</div>'
+        ].join("");
+      }).join("");
+    }
+
+    async function fallbackLoadHosts() {
+      try {
+        var resp = await fetch("/api/terminal/hosts", { cache: "no-store" });
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        var ctype = (resp.headers.get("content-type") || "").toLowerCase();
+        if (ctype.indexOf("application/json") === -1) {
+          throw new Error("Non-JSON response (setup redirect or auth issue)");
+        }
+        var data = await resp.json();
+        renderHostsFallback((data && data.hosts) || []);
+      } catch (err) {
+        showInitError((err && err.message) || "Failed to load hosts");
+      }
+    }
+
+    function boot() {
+      try {
+        if (window.AKDW_Sessions && typeof window.AKDW_Sessions.initialize === "function") {
+          window.AKDW_Sessions.initialize();
+          return;
+        }
+      } catch (err) {
+        showInitError("AKDW_Sessions.initialize crashed: " + ((err && err.message) || err));
+        return;
+      }
+      fallbackLoadHosts();
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", function () {
+        window.setTimeout(boot, 20);
+      });
+    } else {
+      boot();
+    }
+  })();
+</script>
 {% endblock %}
