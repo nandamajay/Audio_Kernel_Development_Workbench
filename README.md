@@ -38,6 +38,13 @@ AKDW is a Flask-based kernel development cockpit for patch review, triage, conve
 - `Target Manager` for device connection, validation runs, SSE logs, and replay
 - Glassmorphic dashboard with live operational stats and recent activity resume
 
+### Terminal IDE Enhancements (2026-04-27)
+
+- Multi-session SSH tabs are supported (parallel active sessions).
+- Session reconnect/reattach is supported when returning to `/editor/`.
+- Terminal font size controls are available in the tab bar (`A-` / `A+`).
+- Saved hosts pane has retry/error fallback (no silent infinite loading state).
+
 ## Tech Stack
 
 - Backend: Flask, Flask-SocketIO, SQLAlchemy, SQLite
@@ -157,6 +164,14 @@ curl -s http://localhost:5001/api/editor/file?path=/app/kernel
 - `Target Manager` not visible in sidebar:
   - Hard refresh browser (`Ctrl+Shift+R`)
   - Confirm running image is up to date (`docker compose up -d --build akdw`)
+- Terminal IDE not updating after deploy:
+  - Rebuild and restart container (`docker compose up -d --build akdw`)
+  - Hard refresh `/editor/` (`Ctrl+Shift+R`) or open in Incognito
+  - Verify editor references current static asset versions (`v=20260427e`)
+- Terminal Saved Hosts stuck at `Loading hosts...`:
+  - Check API health: `curl -s -o /dev/null -w "%{http_code}" http://localhost:5001/api/terminal/hosts`
+  - If non-`200`, resolve setup/auth gate first (`/setup`)
+  - If `200`, reload `/editor/` and check browser console for JS runtime errors
 - `Path not allowed` errors:
   - Verify mounted paths and `KERNEL_SRC_PATH`
 - Agent empty/oversized request behavior:

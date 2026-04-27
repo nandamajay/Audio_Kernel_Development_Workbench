@@ -29,6 +29,21 @@ for page in / /agent/ /editor/ /patchwise/ /triage/ /upstream/ /settings/ /targe
 done
 ```
 
+## Terminal IDE Verification (Phase 6)
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:5001/editor/
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:5001/api/terminal/hosts
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:5001/api/terminal/sessions
+curl -s http://localhost:5001/editor/ | grep -o "akdw_terminal.js?v=[^\"']*" | head -n 1
+```
+
+Expected:
+- `/editor/` returns `200`
+- `/api/terminal/hosts` returns `200`
+- `/api/terminal/sessions` returns `200`
+- JS asset version matches latest deployed version (currently `v=20260427e`)
+
 ## GitHub Push Workflow
 
 ```bash
@@ -67,6 +82,13 @@ GIT_SSH_COMMAND='ssh -x' git push origin --tags
   - ensure blueprint is registered in `app/routes/__init__.py`
 - Agent failures with large files:
   - check `MAX_TOKENS_FOR_FILE` behavior in `app/services/agent_service.py`
+- Terminal IDE saved hosts stays `Loading hosts...`:
+  - verify `/api/terminal/hosts` returns JSON
+  - verify `/editor/` has latest JS version query param
+  - rebuild/restart container and hard refresh browser
+- Terminal socket connect appears hung:
+  - ensure container is running eventlet/socketio runtime from `scripts/entrypoint.sh`
+  - inspect `docker logs akdw` for `/socket.io/` transport errors
 
 ## Runtime Notes
 

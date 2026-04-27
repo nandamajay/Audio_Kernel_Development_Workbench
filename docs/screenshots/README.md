@@ -25,6 +25,11 @@ Capture date: `2026-04-25`
 
 ![Editor Terminal IDE](./editor-terminal-ide-2026-04-25.png)
 
+Note:
+- Latest behavior updates (multi-session restore, font controls, saved-host fallback) were shipped on 2026-04-27.
+- Capture a refreshed screenshot after validation and store as:
+  - `editor-terminal-ide-2026-04-27.png`
+
 ### QGenie Agent
 
 ![Agent Thinking Stream](./agent-thinking-stream-2026-04-25.png)
