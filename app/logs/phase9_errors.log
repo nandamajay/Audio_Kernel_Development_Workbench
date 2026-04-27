@@ -1,0 +1,4 @@
+[2026-04-27 21:31:52] [S2] ImportError circular import: terminal_routes importing socketio from app during app init. Applying handler registration refactor.
+[2026-04-27 21:33:08] [S2] PermissionError create_app with default /app paths outside container; using env overrides for local validation.
+[2026-04-27 21:43:51] [S8] create_app local validation failed due default WORKSPACE_MOUNTS_PATH=/app/workspace_mounts permission; using env override WORKSPACE_MOUNTS_PATH in tests.
+[2026-04-27 21:45:08] [S8] sqlite open failed due non-writable sessions path; using writable DATABASE_URL/SESSIONS_DB_PATH for local validation.

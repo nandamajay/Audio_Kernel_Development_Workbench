@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AKDW Phase 6 Report</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; background: #f8fafc; color: #111827; }
+    h1, h2 { margin: 0 0 10px 0; }
+    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px; margin: 12px 0; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; }
+    th { background: #f3f4f6; }
+    pre { white-space: pre-wrap; background: #0b1220; color: #e2e8f0; padding: 12px; border-radius: 6px; }
+    .ok { color: #166534; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <h1>AKDW Phase 6 · MobaXterm Terminal IDE</h1>
+  <p>Generated: 2026-04-27 21:48:52 +0530</p>
+
+  <div class="card">
+    <h2>Section Results (S0-S9)</h2>
+    <table>
+      <tr><th>Section</th><th>Status</th><th>Notes</th></tr>
+      <tr><td>S0</td><td class="ok">PASS</td><td>Preflight, backup, dependency verification</td></tr>
+      <tr><td>S1</td><td class="ok">PASS</td><td>SSH session manager with PTY bridge created</td></tr>
+      <tr><td>S2</td><td class="ok">PASS</td><td>Terminal APIs, SocketIO handlers, saved host persistence</td></tr>
+      <tr><td>S3</td><td class="ok">PASS</td><td>Editor template rewritten to terminal IDE layout</td></tr>
+      <tr><td>S4</td><td class="ok">PASS</td><td>xterm.js + SocketIO frontend bridge implemented</td></tr>
+      <tr><td>S5</td><td class="ok">PASS</td><td>Tab manager + saved hosts sidebar implemented</td></tr>
+      <tr><td>S6</td><td class="ok">PASS</td><td>Collapsible QGenie drawer implemented</td></tr>
+      <tr><td>S7</td><td class="ok">PASS</td><td>MobaXterm-style CSS theme and layout applied</td></tr>
+      <tr><td>S8</td><td class="ok">PASS</td><td>App wiring, eventlet monkey patch, nav/dashboard updates</td></tr>
+      <tr><td>S9</td><td class="ok">PASS</td><td>TC01-TC15 validations executed</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Test Results Summary (TC01-TC15)</h2>
+    <p><strong>SUMMARY: 15/15 passed</strong></p>
+    <pre>[PASS] TC01 - Flask app starts
+[PASS] TC02 - /editor/ route returns 200
+[PASS] TC03 - /api/terminal/hosts valid JSON
+[PASS] TC04 - /api/terminal/sessions valid JSON
+[PASS] TC05 - xterm.js CDN in editor page
+[PASS] TC06 - socket.io.js in editor page
+[PASS] TC07 - akdw_terminal.js served
+[PASS] TC08 - akdw_sessions.js served
+[PASS] TC09 - akdw_qgenie_drawer.js served
+[PASS] TC10 - akdw_terminal.css served
+[PASS] TC11 - SSH connect modal present
+[PASS] TC12 - Tab bar present
+[PASS] TC13 - QGenie drawer present
+[PASS] TC14 - ssh_manager imports cleanly
+[PASS] TC15 - paramiko available
+SUMMARY: 15/15 passed</pre>
+  </div>
+
+  <div class="card">
+    <h2>Files Created / Modified</h2>
+    <pre>app/__init__.py
+app/logs/phase9_test_results.log
+app/models.py
+app/routes/terminal_routes.py
+app/ssh_manager.py
+app/static/css/terminal/akdw_terminal.css
+app/static/js/terminal/akdw_qgenie_drawer.js
+app/static/js/terminal/akdw_sessions.js
+app/static/js/terminal/akdw_terminal.js
+app/templates/base.html
+app/templates/dashboard.html
+app/templates/editor.html
+scripts/entrypoint.sh</pre>
+  </div>
+
+  <div class="card">
+    <h2>Git Commits (Last 10)</h2>
+    <pre>5a469c6 test(s9): automated TC01-TC15 terminal IDE validation suite
+14afa0a feat(s8): app wiring, eventlet monkey patch, blueprint registration
+37e5669 feat(s7): akdw_terminal.css MobaXterm dark theme + full layout
+025547d feat(s6): akdw_qgenie_drawer.js collapsible AI assistant panel
+449efc3 feat(s5): akdw_sessions.js tab manager + saved hosts sidebar
+1de9221 feat(s4): akdw_terminal.js xterm.js + SocketIO PTY bridge
+ccb3132 feat(s3): editor.html full MobaXterm layout rewrite
+6489e55 feat(s2): SSH terminal Flask-SocketIO event handlers + saved hosts API
+50ccb89 feat(s1): SSH session manager with paramiko PTY + SocketIO bridge
+dc79e75 chore(s0): pre-flight audit and backup for v9 terminal-ide</pre>
+  </div>
+
+  <div class="card">
+    <h2>Next Steps</h2>
+    <ol>
+      <li>Run end-to-end SSH connectivity test against hu-nandam-hyd with real credentials.</li>
+      <li>Add SocketIO integration tests for terminal_connect/input/resize/disconnect events.</li>
+      <li>Harden prompt parsing for cwd/git branch extraction in status bar.</li>
+      <li>Add host edit/update UI and optional encrypted credential vault integration.</li>
+    </ol>
+  </div>
+</body>
+</html>
