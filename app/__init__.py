@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import eventlet
+eventlet.monkey_patch()
+
 import os
 
 from flask import Flask, redirect, request, url_for

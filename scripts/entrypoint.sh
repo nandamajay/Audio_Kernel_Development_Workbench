@@ -26,4 +26,11 @@ if [[ "$#" -gt 0 ]]; then
   exec "$@"
 fi
 
-exec python -m flask --app "app:create_app" run --host="0.0.0.0" --port="${FLASK_PORT:-5000}"
+exec python - <<'PY'
+import os
+
+from app import create_app, socketio
+
+app = create_app()
+socketio.run(app, host="0.0.0.0", port=int(os.environ.get("FLASK_PORT", "5000")))
+PY
