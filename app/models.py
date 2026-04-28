@@ -161,6 +161,45 @@ class UpstreamPatch(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 
+class UpstreamSeries(db.Model):
+    __tablename__ = "upstream_series"
+
+    id = db.Column(db.String(128), primary_key=True)
+    title = db.Column(db.String(512))
+    status = db.Column(db.String(64))
+    versions = db.Column(db.Text)
+    version_count = db.Column(db.Integer, default=1)
+    final_patch_count = db.Column(db.Integer, default=0)
+    v1_posted = db.Column(db.String(32))
+    vN_posted = db.Column(db.String(32))
+    days_to_merge = db.Column(db.Integer)
+    apply_date = db.Column(db.String(32))
+    days_to_apply = db.Column(db.Integer)
+    apply_basis = db.Column(db.String(32))
+    maintainer_delay_days = db.Column(db.Integer)
+    reviewed_by_count = db.Column(db.Integer, default=0)
+    first_review_date = db.Column(db.String(32))
+    days_to_first_review = db.Column(db.Integer)
+    reviewers = db.Column(db.Text)
+    added_lines = db.Column(db.Integer, default=0)
+    removed_lines = db.Column(db.Integer, default=0)
+    net_lines = db.Column(db.Integer, default=0)
+    commit_shas = db.Column(db.Text)
+    lore_url = db.Column(db.String(1024))
+    fetch_mode = db.Column(db.String(32), default="live")
+    last_updated = db.Column(db.String(64))
+
+
+class UpstreamOfflineCache(db.Model):
+    __tablename__ = "upstream_offline_cache"
+
+    id = db.Column(db.Integer, primary_key=True)
+    filename = db.Column(db.String(255))
+    author = db.Column(db.String(255))
+    uploaded_at = db.Column(db.String(64))
+    series_json = db.Column(db.Text)
+
+
 class ActivityLog(db.Model):
     __tablename__ = "activity_log"
 
