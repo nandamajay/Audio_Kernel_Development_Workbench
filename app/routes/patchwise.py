@@ -26,6 +26,7 @@ from werkzeug.utils import secure_filename
 from app.config import MODEL_METADATA, get_available_models, get_default_model
 from app.models import PatchPipelineJob, PatchReviewTrace, ReviewEvidence, ReviewSession, db
 from app.services.activity_service import log_activity
+from app.services.checkpatch_service import resolve_checkpatch_path
 from app.services.env_service import resolve_ssl_verify
 
 
@@ -796,15 +797,17 @@ def _execute_pipeline(
             tmp.write(patch_content)
             tmp_patch_path = tmp.name
 
-        checkpatch_script = _find_script(kernel_root, "checkpatch.pl")
+        checkpatch_script = resolve_checkpatch_path(kernel_root)
+        if not checkpatch_script and kernel_root:
+            checkpatch_script = _find_script(kernel_root, "checkpatch.pl")
         checkpatch_step = _run_or_cancel(
             step_index=1,
             step_total=total_steps,
             step_id="checkpatch",
             step_name="Checkpatch",
-            command=["perl", checkpatch_script, "--no-tree", tmp_patch_path] if checkpatch_script else None,
-            timeout=40,
-            skip_reason="checkpatch.pl not found under kernel tree" if not checkpatch_script else "",
+            command=["perl", checkpatch_script, "--no-tree", "--color=never", tmp_patch_path] if checkpatch_script else None,
+            timeout=60,
+            skip_reason="checkpatch.pl not found. Set Kernel Source Path in Settings." if not checkpatch_script else "",
         )
         cp_out = checkpatch_step.get("output_preview", "")
         checkpatch_step["warnings_count"] = len(re.findall(r"\bWARNING\b", cp_out))
@@ -1219,40 +1222,63 @@ def run_checkpatch():
     if not patch_content.strip():
         return jsonify({"ok": False, "error": "patch_content is required"}), 400
 
-    tmp_patch = f"/tmp/{session_id}.patch"
-    with open(tmp_patch, "w", encoding="utf-8") as handle:
-        handle.write(patch_content)
-
+    tmp_patch_path = ""
     kernel_root = current_app.config.get("KERNEL_SRC_PATH", "/app/kernel")
-    script = _find_script(kernel_root, "checkpatch.pl")
+    script = resolve_checkpatch_path(kernel_root)
+    if not script and kernel_root:
+        script = _find_script(kernel_root, "checkpatch.pl")
 
     if not script:
-        output = "checkpatch.pl not found - skipped"
-        return jsonify({"ok": True, "output": output, "warnings_count": 0, "errors_count": 0})
+        output = "checkpatch.pl not found. Set Kernel Source Path in Settings."
+        return jsonify({"ok": False, "status": "error", "output": output, "warnings_count": 0, "errors_count": 0}), 200
 
-    cmd = ["perl", script, "--no-tree", tmp_patch]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    output = (proc.stdout or "") + (proc.stderr or "")
+    perl_bin = shutil.which("perl") or "perl"
+    if perl_bin == "perl" and not shutil.which("perl"):
+        output = "perl is not available in PATH."
+        return jsonify({"ok": False, "status": "error", "output": output, "warnings_count": 0, "errors_count": 0}), 200
 
-    warnings_count = len(re.findall(r"\bWARNING\b", output))
-    errors_count = len(re.findall(r"\bERROR\b", output))
+    try:
+        with tempfile.NamedTemporaryFile("w", suffix=".patch", delete=False, encoding="utf-8") as handle:
+            handle.write(patch_content)
+            tmp_patch_path = handle.name
 
-    row = ReviewSession.query.filter_by(session_id=session_id).first()
-    if row:
-        row.checkpatch_output = output
-        if not getattr(row, "status", None):
-            row.status = "reviewed"
-        row.updated_at = datetime.utcnow()
-        db.session.commit()
+        cmd = [perl_bin, script, "--no-tree", "--color=never", tmp_patch_path]
+        cwd = kernel_root if kernel_root and os.path.isdir(kernel_root) else None
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60, cwd=cwd)
+        output = (proc.stdout or "") + (proc.stderr or "")
+        warnings_count = len(re.findall(r"\bWARNING\b", output))
+        errors_count = len(re.findall(r"\bERROR\b", output))
 
-    return jsonify(
-        {
-            "ok": True,
-            "output": output,
-            "warnings_count": warnings_count,
-            "errors_count": errors_count,
-        }
-    )
+        row = ReviewSession.query.filter_by(session_id=session_id).first()
+        if row:
+            row.checkpatch_output = output
+            if not getattr(row, "status", None):
+                row.status = "reviewed"
+            row.updated_at = datetime.utcnow()
+            db.session.commit()
+
+        return jsonify(
+            {
+                "ok": True,
+                "status": "pass" if proc.returncode == 0 else "warnings",
+                "output": output,
+                "warnings_count": warnings_count,
+                "errors_count": errors_count,
+                "returncode": proc.returncode,
+            }
+        )
+    except subprocess.TimeoutExpired:
+        output = "checkpatch.pl timed out after 60s"
+        return jsonify({"ok": False, "status": "error", "output": output, "warnings_count": 0, "errors_count": 0}), 200
+    except Exception as exc:
+        output = str(exc)
+        return jsonify({"ok": False, "status": "error", "output": output, "warnings_count": 0, "errors_count": 0}), 200
+    finally:
+        if tmp_patch_path and os.path.exists(tmp_patch_path):
+            try:
+                os.unlink(tmp_patch_path)
+            except Exception:
+                pass
 
 
 @patchwise_bp.post("/api/patchwise/pipeline")
