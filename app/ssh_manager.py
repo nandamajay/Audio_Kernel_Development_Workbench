@@ -108,14 +108,17 @@ class SSHSession:
                         continue
                     data = self.channel.recv(4096)
                     if data:
-                        self.socketio.emit(
-                            "terminal_output",
-                            {
-                                "data": data.decode("utf-8", errors="replace"),
-                                "session_id": self.session_id,
-                            },
-                            room=self.session_id,
-                        )
+                        try:
+                            self.socketio.emit(
+                                "terminal_output",
+                                {
+                                    "data": data.decode("utf-8", errors="replace"),
+                                    "session_id": self.session_id,
+                                },
+                                room=self.session_id,
+                            )
+                        except Exception as emit_exc:  # noqa: BLE001
+                            logger.warning("Socket emit failed [%s]: %s", self.session_id, emit_exc)
                         continue
                     if self.channel.exit_status_ready():
                         self.socketio.emit(

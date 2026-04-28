@@ -114,5 +114,6 @@ def editor_query():
         selected_code=payload.get("selected_code", ""),
         filename=payload.get("filename", ""),
         page="editor",
+        emit_terminal=False,
     )
     return jsonify({"ok": True, "session_id": session_id, "response": result.get("response", "")})

@@ -448,11 +448,17 @@ class AgentService:
         selected_code: str = "",
         filename: str = "",
         page: str = "agent",
+        emit_terminal: bool = False,
     ) -> Dict[str, Any]:
         active_model = (model or get_default_model()).strip() or get_default_model()
         files = attachments or []
         user_prompt, ingestion_notices, prompt_token_estimate = self.build_user_prompt(message, files)
         history = self._seed_history(session_id)
+        terminal_stream_enabled = bool(emit_terminal) or page in {"terminal", "terminal_agent"}
+
+        def _emit_terminal_if_enabled(line: str) -> None:
+            if terminal_stream_enabled:
+                self.emit_terminal_line(session_id, line)
 
         if has_app_context():
             ensure_session(session_id=session_id, page=page, model=active_model)
@@ -509,7 +515,7 @@ class AgentService:
 
         for step in pre_steps:
             self.emit_step(session_id, step)
-            self.emit_terminal_line(session_id, step.content + "\n")
+            _emit_terminal_if_enabled(step.content + "\n")
             self._persist_step(session_id, step)
 
         for notice in ingestion_notices:
@@ -520,7 +526,7 @@ class AgentService:
             )
             warn_step = AgentStep(type="response", content=notice)
             self.emit_step(session_id, warn_step)
-            self.emit_terminal_line(session_id, notice + "\n")
+            _emit_terminal_if_enabled(notice + "\n")
             self._persist_step(session_id, warn_step)
 
         user_content = user_prompt
@@ -555,7 +561,7 @@ class AgentService:
 
         for step in parsed_steps:
             self.emit_step(session_id, step)
-            self.emit_terminal_line(session_id, step.content + "\n")
+            _emit_terminal_if_enabled(step.content + "\n")
             self._persist_step(session_id, step)
             if step.type == "response" and step.content.strip():
                 response_parts.append(step.content.strip())
@@ -586,7 +592,7 @@ class AgentService:
         history = self._truncate_history(history + [{"role": "assistant", "content": final_response}])
         self.session_histories[session_id] = history
 
-        self.emit_terminal_line(session_id, "INFO: response stream completed\n")
+        _emit_terminal_if_enabled("INFO: response stream completed\n")
 
         diff = self._suggest_patch(selected_code)
         if diff:

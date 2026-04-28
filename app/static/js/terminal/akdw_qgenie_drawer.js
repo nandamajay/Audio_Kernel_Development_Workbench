@@ -84,6 +84,7 @@ const AKDW_QGenie = (() => {
           message: text,
           context: 'terminal_ide',
           page: 'editor',
+          emit_terminal: false,
           session_id: AKDW_Terminal.getActive() || undefined
         })
       });

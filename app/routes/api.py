@@ -134,6 +134,11 @@ def agent_chat_api():
     session_id = (payload.get("session_id") or create_session_id()).strip()
     model = (payload.get("model") or get_default_model()).strip()
     page = (payload.get("page") or "agent").strip()
+    emit_terminal_raw = payload.get("emit_terminal", False)
+    if isinstance(emit_terminal_raw, bool):
+        emit_terminal = emit_terminal_raw
+    else:
+        emit_terminal = str(emit_terminal_raw).strip().lower() in {"1", "true", "yes", "on"}
 
     service = current_app.extensions["agent_service"]
     result = service.stream_chat(
@@ -144,6 +149,7 @@ def agent_chat_api():
         selected_code=payload.get("selected_code", ""),
         filename=payload.get("filename", ""),
         page=page,
+        emit_terminal=emit_terminal,
     )
     log_activity("Agent session: " + ((message or "(attachments)")[:50]), "agent")
 

@@ -7,6 +7,7 @@ const AKDW_Sessions = (() => {
   let tabCounter = 0;
   const tabs = {};
   let initialized = false;
+  const LAST_ACTIVE_KEY = 'akdw_terminal_last_active';
 
   function addTab(sessionId, hostname, options = {}) {
     if (!sessionId) return null;
@@ -71,6 +72,7 @@ const AKDW_Sessions = (() => {
     const tab = tabs[sessionId];
     if (!tab) return;
     tab.tabEl.classList.add('active');
+    safeStorageSet(LAST_ACTIVE_KEY, sessionId);
     AKDW_Terminal.showSession(sessionId);
   }
 
@@ -81,6 +83,9 @@ const AKDW_Sessions = (() => {
     if (tab) {
       tab.tabEl.remove();
       delete tabs[sessionId];
+      if (safeStorageGet(LAST_ACTIVE_KEY) === sessionId) {
+        safeStorageSet(LAST_ACTIVE_KEY, '');
+      }
     }
 
     AKDW_Terminal.closeSession(sessionId);
@@ -207,18 +212,24 @@ const AKDW_Sessions = (() => {
       if (!resp.ok) return;
       const data = await resp.json();
       const sessions = Array.isArray(data.sessions) ? data.sessions : [];
-      const active = sessions.filter((s) => Boolean(s.active));
-      if (!active.length) return;
+      if (!sessions.length) return;
 
-      active.forEach((s, idx) => {
+      sessions.forEach((s) => {
         const sid = s.session_id;
         const host = s.hostname || 'session';
-        addTab(sid, host, { status: 'connected', activate: idx === active.length - 1 });
+        addTab(sid, host, { status: s.active ? 'connected' : 'disconnected', activate: false });
         AKDW_Terminal.attachSession(sid, {
           hostname: s.hostname || '',
           username: s.username || ''
         });
       });
+
+      const preferred = safeStorageGet(LAST_ACTIVE_KEY);
+      if (preferred && tabs[preferred]) {
+        activateTab(preferred);
+      } else if (sessions[sessions.length - 1] && tabs[sessions[sessions.length - 1].session_id]) {
+        activateTab(sessions[sessions.length - 1].session_id);
+      }
     } catch (_err) {
       // no-op
     }
@@ -269,6 +280,26 @@ const AKDW_Sessions = (() => {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+  }
+
+  function safeStorageGet(key) {
+    try {
+      return window.localStorage.getItem(key);
+    } catch (_err) {
+      return null;
+    }
+  }
+
+  function safeStorageSet(key, value) {
+    try {
+      if (!value) {
+        window.localStorage.removeItem(key);
+      } else {
+        window.localStorage.setItem(key, value);
+      }
+    } catch (_err) {
+      // no-op
+    }
   }
 
   return {
