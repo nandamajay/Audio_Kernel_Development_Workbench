@@ -2,223 +2,162 @@
 {% block title %}Upstream Tracker{% endblock %}
 
 {% block head %}
+{{ super() }}
 <style>
-  .upstream-shell {
+  .upstream-visual {
     display: grid;
     gap: 12px;
   }
-
-  .upstream-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+  .glass-card {
     border: 1px solid var(--glass-border);
     border-radius: var(--radius-card);
-    background: var(--gradient-card);
-    padding: 18px;
-  }
-
-  .upstream-header h1 {
-    margin: 0;
-    font-size: 1.5rem;
-  }
-
-  .upstream-header p {
-    margin: 4px 0 0;
-    color: var(--text-muted);
-  }
-
-  .upstream-actions {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .status-summary {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 10px;
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-card);
-    background: rgba(255,255,255,0.03);
-  }
-
-  .status-chip {
-    border: 1px solid var(--glass-border);
-    border-radius: 999px;
-    background: rgba(255,255,255,0.04);
-    color: var(--text-primary);
-    font-size: 12px;
-    padding: 5px 10px;
-    cursor: pointer;
-  }
-
-  .status-chip.active {
-    border-color: var(--accent-blue);
-    box-shadow: var(--shadow-glow);
-  }
-
-  .upstream-tools {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .upstream-email-bar {
-    display: grid;
-    gap: 8px;
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-card);
-    background: rgba(255,255,255,0.03);
+    background: rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
     padding: 12px;
   }
-
-  .email-select-chips {
+  .upstream-action-bar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .upstream-action-group {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .meta-row {
+    font-size: 12px;
+    color: var(--text-muted);
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 12px;
+    align-items: center;
   }
-
-  .email-select-chip {
+  .fetch-badge {
     border: 1px solid var(--glass-border);
     border-radius: 999px;
-    background: rgba(255,255,255,0.05);
-    color: var(--text-primary);
+    padding: 2px 10px;
     font-size: 12px;
-    padding: 4px 10px;
-    cursor: pointer;
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.05);
   }
-
-  .email-select-chip.active {
-    border-color: var(--accent-blue);
-    box-shadow: var(--shadow-glow);
-  }
-
-  .quick-add-row {
+  .kpi-grid {
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: repeat(7, minmax(120px, 1fr));
     gap: 8px;
   }
-
-  .patches-table-container {
+  .kpi-card {
     border: 1px solid var(--glass-border);
-    border-radius: var(--radius-card);
-    overflow: hidden;
-    background: rgba(255,255,255,0.02);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    padding: 10px;
   }
-
-  .patches-table {
+  .kpi-label {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .kpi-value {
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+  .chart-grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    gap: 10px;
+  }
+  .chart-grid-2-eq {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .chart-card {
+    position: relative;
+    min-height: 280px;
+  }
+  .chart-title {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--text-primary);
+  }
+  .chart-card canvas {
+    width: 100% !important;
+    height: 240px !important;
+  }
+  .table-toolbar {
+    display: grid;
+    grid-template-columns: 1fr 180px;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .upstream-table {
     width: 100%;
     border-collapse: collapse;
     font-size: 12px;
   }
-
-  .patches-table th,
-  .patches-table td {
-    padding: 8px 10px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+  .upstream-table th,
+  .upstream-table td {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 8px;
     text-align: left;
     vertical-align: top;
   }
-
-  .patch-subject {
-    max-width: 500px;
-  }
-
-  .patch-badge {
-    border: 1px solid var(--glass-border);
-    border-radius: 999px;
-    padding: 3px 8px;
-    white-space: nowrap;
-  }
-
-  .source-tag {
-    border: 1px solid var(--glass-border);
-    border-radius: 999px;
-    font-size: 11px;
-    padding: 2px 6px;
-  }
-
-  .source-patchwork { color: #93c5fd; }
-  .source-lore { color: #d8b4fe; }
-
-  .fetch-meta {
-    padding: 8px 10px;
-    color: var(--text-muted);
-    font-size: 12px;
-  }
-
-  .upstream-list {
-    display: grid;
-    gap: 10px;
-  }
-
-  .upstream-card {
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-card);
-    background: rgba(255,255,255,0.03);
-    padding: 12px;
-    display: grid;
-    gap: 8px;
-  }
-
-  .upstream-card-head {
-    display: flex;
-    justify-content: space-between;
-    gap: 8px;
-    align-items: center;
-  }
-
-  .upstream-title {
-    font-weight: 600;
-  }
-
-  .upstream-links {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    font-size: 12px;
-  }
-
-  .upstream-links a,
-  .upstream-links button {
-    color: var(--accent-blue);
-    text-decoration: underline;
-    background: none;
-    border: none;
-    padding: 0;
+  .upstream-table th[data-sort] {
     cursor: pointer;
+    user-select: none;
   }
-
-  .upstream-meta {
+  .status-badge {
+    border-radius: 999px;
+    border: 1px solid transparent;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    display: inline-block;
+  }
+  .status-merged {
+    color: #22c55e;
+    border-color: #22c55e55;
+    background: #22c55e1a;
+  }
+  .status-reviewed {
+    color: #f59e0b;
+    border-color: #f59e0b55;
+    background: #f59e0b1a;
+  }
+  .status-pending {
+    color: #6366f1;
+    border-color: #6366f155;
+    background: #6366f11a;
+  }
+  .truncate-title {
+    max-width: 520px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: inline-block;
+  }
+  .no-data {
     color: var(--text-muted);
     font-size: 12px;
+    padding: 12px 0;
   }
-
-  .upstream-actions-row {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
   .upstream-modal {
     position: fixed;
     inset: 0;
-    z-index: 70;
+    background: rgba(0, 0, 0, 0.6);
     display: none;
     place-items: center;
-    background: rgba(1, 4, 9, 0.65);
+    z-index: 80;
   }
-
   .upstream-modal.open {
     display: grid;
   }
-
   .upstream-modal-card {
-    width: min(620px, 92vw);
+    width: min(500px, 92vw);
     border: 1px solid var(--glass-border);
     border-radius: var(--radius-card);
     background: var(--bg-secondary);
@@ -226,419 +165,122 @@
     display: grid;
     gap: 10px;
   }
-
-  .upstream-modal-card h3 {
-    margin: 0;
+  .loading-indicator {
+    font-size: 12px;
+    color: var(--text-muted);
   }
-
-  @media (max-width: 900px) {
-    .upstream-header {
-      flex-direction: column;
-      align-items: flex-start;
-    }
-    .upstream-tools {
-      flex-direction: column;
-      align-items: stretch;
-    }
+  @media (max-width: 1100px) {
+    .kpi-grid { grid-template-columns: repeat(3, minmax(120px, 1fr)); }
+    .chart-grid-2,
+    .chart-grid-2-eq { grid-template-columns: 1fr; }
+    .table-toolbar { grid-template-columns: 1fr; }
   }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="upstream-shell upstream-tracker">
-  <div class="upstream-header">
-    <div>
-      <h1>📬 Upstream Patch Tracker</h1>
-      <p>Track your kernel patches on lore.kernel.org</p>
+<div class="upstream-visual">
+  <div class="glass-card">
+    <div class="upstream-action-bar">
+      <div class="upstream-action-group">
+        <button id="btn-live-fetch" class="btn-primary" type="button">📡 Live Fetch</button>
+        <button id="btn-upload-mbox" class="btn-secondary" type="button">📂 Upload .mbox/.gz</button>
+        <button id="btn-refresh" class="btn-secondary" type="button">🔄 Refresh</button>
+      </div>
+      <span id="fetch-mode-badge" class="fetch-badge">🟢 Live</span>
     </div>
-    <div class="upstream-actions">
-      <button class="btn-primary" type="button" onclick="openAddModal()">+ Add Patch</button>
-      <button class="btn-secondary" type="button" onclick="refreshAll()">🔄 Refresh All</button>
-    </div>
-  </div>
-
-  <div class="upstream-email-bar">
-    <label>👤 Tracking patches for:</label>
-    <div class="email-select-chips" id="upstreamEmailChips"></div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-      <button class="btn-secondary btn-add-email-inline" type="button" onclick="document.getElementById('quickAddEmail').style.display='grid'">+ Add Email</button>
-      <button class="btn-secondary" type="button" onclick="refreshSelectedEmail()">🔄 Refresh Selected</button>
-    </div>
-    <div id="quickAddEmail" class="quick-add-row" style="display:none;">
-      <input type="email" id="quickEmailInput" class="input" placeholder="Add email to track...">
-      <button class="btn-primary" type="button" onclick="quickAddAndFetch()">Fetch & Track</button>
+    <div class="meta-row" style="margin-top:8px;">
+      <span>Author: <strong id="author-email">{{ author_email or '' }}</strong></span>
+      <span>Last updated: <span id="last-updated">-</span></span>
+      <span id="loading-indicator" class="loading-indicator">Idle</span>
     </div>
   </div>
 
-  <div class="patches-table-container" id="patchesTableContainer">
-    <table class="patches-table">
-      <thead>
-        <tr>
-          <th>Subject</th>
-          <th>Date</th>
-          <th>Mailing List</th>
-          <th>Status</th>
-          <th>Source</th>
-          <th>Link</th>
-        </tr>
-      </thead>
-      <tbody id="patchesTableBody">
-        <tr><td colspan="6">Select an email to fetch patches.</td></tr>
-      </tbody>
-    </table>
-    <div class="fetch-meta" id="fetchMeta"></div>
+  <div class="kpi-grid">
+    <div class="kpi-card"><div class="kpi-label">Total Series</div><div id="kpi-total-series" class="kpi-value">0</div></div>
+    <div class="kpi-card"><div class="kpi-label">Merged</div><div id="kpi-merged" class="kpi-value">0</div></div>
+    <div class="kpi-card"><div class="kpi-label">Reviewed</div><div id="kpi-reviewed" class="kpi-value">0</div></div>
+    <div class="kpi-card"><div class="kpi-label">Pending</div><div id="kpi-pending" class="kpi-value">0</div></div>
+    <div class="kpi-card"><div class="kpi-label">Avg Days→Merge</div><div id="kpi-avg-merge" class="kpi-value">0</div></div>
+    <div class="kpi-card"><div class="kpi-label">Avg Days→Apply</div><div id="kpi-avg-apply" class="kpi-value">0</div></div>
+    <div class="kpi-card"><div class="kpi-label">Total Patches</div><div id="kpi-total-patches" class="kpi-value">0</div></div>
   </div>
 
-  <div id="statusSummary" class="status-summary"></div>
-
-  <div class="upstream-tools">
-    <div class="small-muted" id="upstreamCount">0 patches</div>
-    <select id="sortOrder" class="input small">
-      <option value="newest">Newest First</option>
-      <option value="oldest">Oldest First</option>
-      <option value="status">Status</option>
-    </select>
+  <div class="chart-grid-2">
+    <div class="glass-card chart-card">
+      <div class="chart-title">Status Breakdown</div>
+      <canvas id="chart-status-donut"></canvas>
+    </div>
+    <div class="glass-card chart-card">
+      <div class="chart-title">Monthly Submissions Timeline</div>
+      <canvas id="chart-monthly-timeline"></canvas>
+    </div>
   </div>
 
-  <div id="upstreamList" class="upstream-list">
-    <div class="small-muted">Loading patches...</div>
+  <div class="chart-grid-2-eq">
+    <div class="glass-card chart-card">
+      <div class="chart-title">Patch Revision Journey</div>
+      <canvas id="chart-version-distribution"></canvas>
+    </div>
+    <div class="glass-card chart-card">
+      <div class="chart-title">Time to Merge Distribution</div>
+      <canvas id="chart-days-histogram"></canvas>
+    </div>
+  </div>
+
+  <div class="glass-card chart-card">
+    <div class="chart-title">Top 10 Series by Code Contribution</div>
+    <canvas id="chart-top-series-lines"></canvas>
+  </div>
+
+  <div class="glass-card">
+    <div class="table-toolbar">
+      <input id="filter-title" class="input" placeholder="Search by series title..." />
+      <select id="filter-status" class="input">
+        <option value="">All Status</option>
+        <option value="MERGED">MERGED</option>
+        <option value="REVIEWED_NOT_MERGED">REVIEWED_NOT_MERGED</option>
+        <option value="PENDING">PENDING</option>
+      </select>
+    </div>
+    <div style="overflow:auto;">
+      <table id="upstream-patch-table" class="upstream-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th data-sort="title">Title</th>
+            <th data-sort="status">Status</th>
+            <th data-sort="version_count">Versions</th>
+            <th data-sort="v1_posted">v1</th>
+            <th data-sort="vN_posted">vN</th>
+            <th data-sort="days_to_merge">Days</th>
+            <th>Reviewers</th>
+            <th data-sort="added_lines">Lines+</th>
+            <th>Commits</th>
+          </tr>
+        </thead>
+        <tbody id="upstream-table-body">
+          <tr><td colspan="10" class="no-data">No data yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
 
-<div id="addModal" class="upstream-modal" onclick="if(event.target===this) closeAddModal()">
+<div id="mbox-upload-modal" class="upstream-modal" onclick="if(event.target===this)this.classList.remove('open')">
   <div class="upstream-modal-card">
-    <h3>➕ Add Upstream Patch</h3>
-    <label class="small-muted">lore.kernel.org URL</label>
-    <input id="addUrl" class="input" placeholder="https://lore.kernel.org/...">
-    <label class="small-muted">Notes (optional)</label>
-    <textarea id="addNotes" class="input" rows="4" placeholder="My first upstream submission..."></textarea>
+    <h3>Upload Offline Patch Data</h3>
+    <input id="mbox-file-input" type="file" accept=".mbox,.gz,.mbox.gz" class="input" />
     <div style="display:flex;justify-content:flex-end;gap:8px;">
-      <button class="btn-secondary" type="button" onclick="closeAddModal()">Cancel</button>
-      <button id="addSubmit" class="btn-primary" type="button" onclick="submitAddPatch()">Add & Fetch ✨</button>
+      <button type="button" class="btn-secondary" onclick="document.getElementById('mbox-upload-modal').classList.remove('open')">Cancel</button>
+      <button type="button" class="btn-primary" id="btn-upload-confirm">Parse &amp; Visualize</button>
     </div>
-    <div id="addStatus" class="small-muted"></div>
   </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
-<script>
-(function () {
-  let patches = [];
-  let activeFilter = "all";
-  let selectedTrackedEmail = "";
-
-  const STATE_BADGES = {
-    accepted: "🟢 APPLIED",
-    applied: "🟢 APPLIED",
-    merged: "🟢 APPLIED",
-    superseded: "🔵 SUPERSEDED",
-    reviewed: "🔵 REVIEWED",
-    new: "🟡 PENDING",
-    submitted: "🟡 PENDING",
-    under_review: "🟡 REVIEWING",
-    "under-review": "🟡 REVIEWING",
-    rejected: "🔴 REJECTED",
-    deferred: "🟠 DEFERRED",
-    unknown: "⚫ UNKNOWN"
-  };
-
-  function fmtStatus(status) {
-    return (status || "submitted").replace(/_/g, " ");
-  }
-
-  function escapeHtml(text) {
-    return String(text || "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
-  }
-
-  function statusClass(status) {
-    return status || "submitted";
-  }
-
-  function applyFilterSort(rows) {
-    const sort = document.getElementById("sortOrder").value;
-    let out = rows.slice();
-    if (activeFilter !== "all") {
-      out = out.filter((item) => (item.status || "submitted") === activeFilter);
-    }
-    if (sort === "oldest") {
-      out.sort((a, b) => String(a.created_at || "").localeCompare(String(b.created_at || "")));
-    } else if (sort === "status") {
-      out.sort((a, b) => String(a.status || "").localeCompare(String(b.status || "")));
-    } else {
-      out.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
-    }
-    return out;
-  }
-
-  function renderStats(stats) {
-    const box = document.getElementById("statusSummary");
-    const chips = [
-      ["all", "Total", stats.total || 0],
-      ["submitted", "Submitted", stats.submitted || 0],
-      ["under_review", "Under Review", stats.under_review || 0],
-      ["changes_requested", "Changes Requested", stats.changes_requested || 0],
-      ["merged", "Merged", stats.merged || 0],
-      ["rejected", "Rejected", stats.rejected || 0]
-    ];
-    box.innerHTML = chips.map(([key, label, count]) => (
-      '<button type="button" class="status-chip ' + ((activeFilter === key) ? 'active' : '') + '" onclick="setStatusFilter(\'' + key + '\')">'
-      + label + ': ' + count + '</button>'
-    )).join("");
-  }
-
-  function cardTemplate(item) {
-    const title = item.title || item.lore_url;
-    const notes = item.notes || "";
-    const comments = item.reviewer_comments || "No reviewer comments yet";
-    return [
-      '<div class="upstream-card patch-card" data-id="' + item.id + '">',
-      '  <div class="upstream-card-head">',
-      '    <div class="upstream-title">🩹 ' + title + '</div>',
-      '    <span class="health-pill ' + statusClass(item.status) + '">' + fmtStatus(item.status) + '</span>',
-      '  </div>',
-      '  <div class="upstream-links">',
-      '    <a href="' + (item.lore_url || '#') + '" target="_blank" rel="noopener noreferrer">🔗 Open</a>',
-      '    <button type="button" onclick="copyText(\'' + (item.lore_url || '').replace(/'/g, "\\'") + '\')">📋 Copy</button>',
-      '  </div>',
-      '  <div class="upstream-meta">Submitted: ' + (item.submitted_at || 'N/A') + ' · Subsystem: ' + (item.subsystem || 'N/A') + ' · ' + (item.merged_tree || 'pending tree') + '</div>',
-      '  <div>💬 "' + comments + '"</div>',
-      '  <div class="small-muted">📝 Your notes: <span id="note-' + item.id + '">' + notes + '</span></div>',
-      '  <div class="upstream-actions-row">',
-      '    <button class="btn-secondary" type="button" onclick="editNotes(' + item.id + ')">✏ Edit Notes</button>',
-      '    <button class="btn-secondary" type="button" onclick="refreshPatch(' + item.id + ')">🔄 Refresh</button>',
-      '    <button class="btn-secondary" type="button" onclick="removePatch(' + item.id + ')">🗑 Remove</button>',
-      '  </div>',
-      '</div>'
-    ].join("");
-  }
-
-  function renderList() {
-    const rows = applyFilterSort(patches);
-    const list = document.getElementById("upstreamList");
-    document.getElementById("upstreamCount").textContent = rows.length + " patches";
-    if (!rows.length) {
-      list.innerHTML = '<div class="small-muted">No patches tracked for this filter.</div>';
-      return;
-    }
-    list.innerHTML = rows.map(cardTemplate).join("");
-  }
-
-  function renderEmailChips(emails) {
-    const chips = document.getElementById('upstreamEmailChips');
-    chips.innerHTML = '';
-    (emails || []).forEach(function (email, idx) {
-      const chip = document.createElement('button');
-      chip.type = 'button';
-      chip.className = 'email-select-chip' + ((email === selectedTrackedEmail || (!selectedTrackedEmail && idx === 0)) ? ' active' : '');
-      chip.textContent = email;
-      chip.addEventListener('click', function () {
-        selectedTrackedEmail = email;
-        renderEmailChips(emails);
-        fetchPatchesForEmail(email);
-      });
-      chips.appendChild(chip);
-    });
-  }
-
-  async function fetchPatchesForEmail(email) {
-    const tbody = document.getElementById('patchesTableBody');
-    const meta = document.getElementById('fetchMeta');
-    tbody.innerHTML = '<tr><td colspan="6">⏳ Fetching patches...</td></tr>';
-    meta.textContent = '';
-    try {
-      const res = await fetch('/api/upstream/fetch?email=' + encodeURIComponent(email));
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Fetch failed');
-      const rows = data.patches || [];
-      tbody.innerHTML = '';
-      if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="6">No patches found for this email</td></tr>';
-      } else {
-        rows.forEach(function (p) {
-          const state = String((p.state || 'unknown')).toLowerCase();
-          const badge = STATE_BADGES[state] || '⚫ UNKNOWN';
-          const date = String(p.date || '').slice(0, 10) || '—';
-          const subject = String(p.subject || '');
-          const tr = document.createElement('tr');
-          tr.innerHTML =
-            '<td class="patch-subject" title="' + escapeHtml(subject) + '">' + escapeHtml(subject.slice(0, 70)) + (subject.length > 70 ? '…' : '') + '</td>' +
-            '<td>' + escapeHtml(date) + '</td>' +
-            '<td>' + escapeHtml(p.list || '—') + '</td>' +
-            '<td><span class="patch-badge">' + badge + '</span></td>' +
-            '<td><span class="source-tag source-' + escapeHtml(p.source || 'lore') + '">' + escapeHtml(p.source || 'lore') + '</span></td>' +
-            '<td>' + (p.url ? '<a href="' + escapeHtml(p.url) + '" target="_blank" rel="noopener noreferrer">🔗 View</a>' : '—') + '</td>';
-          tbody.appendChild(tr);
-        });
-      }
-      meta.textContent =
-        'Showing ' + Number(data.count || 0) + ' patches for ' + email +
-        ' — Last fetched: ' + String(data.fetched || '').slice(0, 19) + ' UTC';
-    } catch (err) {
-      tbody.innerHTML = '<tr><td colspan="6">Failed to fetch patches for this email.</td></tr>';
-    }
-  }
-
-  async function initUpstreamTracker() {
-    try {
-      const res = await fetch('/api/upstream/emails');
-      const data = await res.json();
-      const emails = data.emails || [];
-      if (emails.length) {
-        selectedTrackedEmail = selectedTrackedEmail || emails[0];
-      }
-      renderEmailChips(emails);
-      if (selectedTrackedEmail) {
-        fetchPatchesForEmail(selectedTrackedEmail);
-      }
-    } catch (err) {
-      renderEmailChips([]);
-    }
-  }
-
-  window.quickAddAndFetch = async function () {
-    const input = document.getElementById('quickEmailInput');
-    const email = (input.value || '').trim();
-    if (!email) return;
-    const res = await fetch('/api/upstream/emails', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: email })
-    });
-    const data = await res.json();
-    if (!res.ok) return;
-    input.value = '';
-    selectedTrackedEmail = email;
-    renderEmailChips(data.emails || []);
-    fetchPatchesForEmail(email);
-  };
-
-  window.refreshSelectedEmail = function () {
-    if (selectedTrackedEmail) fetchPatchesForEmail(selectedTrackedEmail);
-  };
-
-  async function loadStats() {
-    const res = await fetch("/api/upstream/stats");
-    if (!res.ok) {
-      renderStats({ total: 0 });
-      return;
-    }
-    const data = await res.json();
-    renderStats(data);
-  }
-
-  async function loadList() {
-    const res = await fetch("/api/upstream/list");
-    if (!res.ok) {
-      document.getElementById("upstreamList").innerHTML = '<div class="small-muted">Failed to load tracker list.</div>';
-      return;
-    }
-    patches = await res.json();
-    renderList();
-  }
-
-  window.setStatusFilter = function (status) {
-    activeFilter = status;
-    loadStats();
-    renderList();
-  };
-
-  window.openAddModal = function () {
-    document.getElementById("addModal").classList.add("open");
-    document.getElementById("addStatus").textContent = "";
-  };
-
-  window.closeAddModal = function () {
-    document.getElementById("addModal").classList.remove("open");
-  };
-
-  window.submitAddPatch = async function () {
-    const btn = document.getElementById("addSubmit");
-    const status = document.getElementById("addStatus");
-    const url = document.getElementById("addUrl").value.trim();
-    const notes = document.getElementById("addNotes").value.trim();
-    if (!url) {
-      status.textContent = "URL is required";
-      return;
-    }
-
-    btn.disabled = true;
-    btn.textContent = "Fetching patch metadata...";
-    status.textContent = "Contacting lore.kernel.org...";
-    try {
-      const res = await fetch("/api/upstream/add", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, notes })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "Add failed");
-      }
-      document.getElementById("addUrl").value = "";
-      document.getElementById("addNotes").value = "";
-      closeAddModal();
-      await loadStats();
-      await loadList();
-    } catch (err) {
-      status.textContent = err.message;
-    } finally {
-      btn.disabled = false;
-      btn.textContent = "Add & Fetch ✨";
-    }
-  };
-
-  window.refreshPatch = async function (id) {
-    await fetch("/api/upstream/" + id + "/refresh", { method: "POST" });
-    await loadStats();
-    await loadList();
-  };
-
-  window.refreshAll = async function () {
-    const rows = patches.slice();
-    for (const item of rows) {
-      await fetch("/api/upstream/" + item.id + "/refresh", { method: "POST" });
-    }
-    await loadStats();
-    await loadList();
-  };
-
-  window.removePatch = async function (id) {
-    await fetch("/api/upstream/" + id, { method: "DELETE" });
-    await loadStats();
-    await loadList();
-  };
-
-  window.editNotes = async function (id) {
-    const row = patches.find((item) => item.id === id);
-    if (!row) {
-      return;
-    }
-    const next = window.prompt("Update notes", row.notes || "");
-    if (next === null) {
-      return;
-    }
-    await fetch("/api/upstream/" + id, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ notes: next })
-    });
-    await loadList();
-  };
-
-  window.copyText = function (value) {
-    navigator.clipboard.writeText(value || "");
-  };
-
-  document.getElementById("sortOrder").addEventListener("change", renderList);
-  initUpstreamTracker();
-  loadStats();
-  loadList();
-})();
-</script>
+{{ super() }}
+<script src="{{ url_for('static', filename='js/chart.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/akdw_upstream_charts.js') }}"></script>
 {% endblock %}
