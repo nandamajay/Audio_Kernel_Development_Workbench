@@ -17,6 +17,7 @@ from app.config import (
     get_user_display_name,
 )
 from app.models import ActivityLog, ConversionJob, Message, ReviewSession, Session, TriageSession, UpstreamPatch
+from app.services.checkpatch_service import resolve_checkpatch_in_root, resolve_checkpatch_path
 from app.services.env_service import (
     current_username,
     load_env_values,
@@ -362,6 +363,8 @@ def settings_page():
     if not env_values.get("USER_EMAIL"):
         display = (env_values.get("USER_DISPLAY_NAME") or "").strip()
         env_values["USER_EMAIL"] = display if "@" in display else ""
+    env_values.setdefault("QGENIE_SSL_VERIFY", "true")
+    env_values.setdefault("QGENIE_CA_BUNDLE", "")
     env_values.setdefault("UPSTREAM_TRACKED_EMAILS", "[]")
     env_values.setdefault("SMTP_HOST", "localhost")
     env_values.setdefault("SMTP_PORT", "25")
@@ -436,6 +439,15 @@ def save_settings():
     save_env_values(updates)
     _refresh_runtime_config(updates)
     return jsonify({"ok": True, "success": True, "message": "Settings saved"})
+
+
+@dashboard_bp.get("/api/validate_checkpatch")
+def validate_checkpatch():
+    kernel_root = (request.args.get("path") or "").strip()
+    if not kernel_root:
+        kernel_root = os.environ.get("KERNEL_SRC_PATH", Config.KERNEL_SRC_PATH)
+    script = resolve_checkpatch_in_root(kernel_root)
+    return jsonify({"found": bool(script), "path": script or ""})
 
 
 @dashboard_bp.get("/api/models")

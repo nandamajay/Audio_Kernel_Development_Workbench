@@ -171,13 +171,13 @@
     <input id="providerUrl" class="input" value="{{ values.get('QGENIE_PROVIDER_URL', '') }}">
 
     <label>SSL Verify</label>
-    <select id="sslVerify" class="input">
+    <select id="sslVerify" class="input" data-testid="ssl-verify-field">
       <option value="true" {% if values.get('QGENIE_SSL_VERIFY', 'true') == 'true' %}selected{% endif %}>true (recommended)</option>
       <option value="false" {% if values.get('QGENIE_SSL_VERIFY', 'true') == 'false' %}selected{% endif %}>false (temporary workaround)</option>
     </select>
 
     <label>CA Bundle Path (optional)</label>
-    <input id="caBundle" class="input" value="{{ values.get('QGENIE_CA_BUNDLE', '') }}" placeholder="/app/certs/qcom-ca-chain.crt">
+    <input id="caBundle" class="input" data-testid="ca-bundle-field" value="{{ values.get('QGENIE_CA_BUNDLE', '') }}" placeholder="/app/certs/qcom-ca-chain.crt">
 
     <label>Default Model</label>
     <select id="defaultModel" class="input">
@@ -189,6 +189,7 @@
 
     <label>Kernel Source Path</label>
     <input id="kernelSrcPath" class="input" value="{{ values.get('KERNEL_SRC_PATH', '/app/kernel') }}">
+    <div id="checkpatchPathStatus" class="small-muted"></div>
 
     <label>Extra Workspace Paths</label>
     <div class="extra-path-row">
@@ -295,6 +296,24 @@
     });
   }
 
+  async function validateCheckpatchPath() {
+    const statusEl = document.getElementById('checkpatchPathStatus');
+    if (!statusEl) return;
+    const path = document.getElementById('kernelSrcPath').value.trim();
+    statusEl.textContent = 'Checking checkpatch.pl...';
+    try {
+      const res = await fetch('/api/validate_checkpatch?path=' + encodeURIComponent(path));
+      const data = await res.json();
+      if (data.found) {
+        statusEl.textContent = '✅ checkpatch.pl found at ' + (data.path || (path + '/scripts/checkpatch.pl'));
+      } else {
+        statusEl.textContent = '⚠️ checkpatch.pl not found. Configure Kernel Source Path.';
+      }
+    } catch (err) {
+      statusEl.textContent = '⚠️ Unable to validate checkpatch.pl';
+    }
+  }
+
   async function loadTrackedEmails() {
     try {
       const res = await fetch('/api/upstream/emails');
@@ -389,6 +408,7 @@
     });
     const data = await resp.json();
     setStatus(!!data.ok, data.message || 'Settings updated');
+    validateCheckpatchPath();
   });
 
   document.getElementById('addTrackedEmailBtn').addEventListener('click', addTrackedEmail);
@@ -399,8 +419,17 @@
     }
   });
 
+  document.getElementById('kernelSrcPath').addEventListener('blur', validateCheckpatchPath);
+
   renderExtraPaths();
   loadTrackedEmails();
+  validateCheckpatchPath();
+
+  ['ssl-verify-field', 'ca-bundle-field'].forEach(function (id) {
+    if (!document.querySelector('[data-testid="' + id + '"]')) {
+      console.error('AKDW SETTINGS BUG: ' + id + ' missing from DOM!');
+    }
+  });
 })();
 </script>
 {% endblock %}

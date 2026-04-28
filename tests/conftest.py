@@ -26,6 +26,8 @@ def app(tmp_path, monkeypatch):
     patches.mkdir(parents=True, exist_ok=True)
     sessions.mkdir(parents=True, exist_ok=True)
     logs.mkdir(parents=True, exist_ok=True)
+    workspace_mounts = tmp_path / "workspace_mounts"
+    workspace_mounts.mkdir(parents=True, exist_ok=True)
 
     db_path = sessions / "test_sessions.db"
 
@@ -39,6 +41,7 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setenv("PATCHES_PATH", str(patches))
     monkeypatch.setenv("LOGS_PATH", str(logs))
     monkeypatch.setenv("SESSIONS_DB_PATH", str(db_path))
+    monkeypatch.setenv("WORKSPACE_MOUNTS_PATH", str(workspace_mounts))
 
     # Keep route tests focused on route behavior, not first-run redirection.
     monkeypatch.setattr(app_package, "is_first_run", lambda: False)
