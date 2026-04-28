@@ -7,6 +7,7 @@ import os
 import re
 from datetime import datetime
 from email.utils import parsedate_to_datetime
+from pathlib import Path
 from typing import Any, Dict
 from urllib.parse import quote
 import xml.etree.ElementTree as ET
@@ -14,9 +15,11 @@ import xml.etree.ElementTree as ET
 import requests
 from bs4 import BeautifulSoup
 from flask import Blueprint, current_app, jsonify, render_template, request
+from werkzeug.utils import secure_filename
 
 from app.config import get_default_model
-from app.models import UpstreamPatch, db
+from app.models import UpstreamOfflineCache, UpstreamPatch, UpstreamSeries, db
+from app.scripts.upstream_parser import enrich_series, parse_mbox_gz, summary_from_series
 from app.services.activity_service import log_activity
 from app.services.env_service import resolve_ssl_verify
 from app.services.settings_service import get_json_setting, get_setting, save_setting
@@ -364,10 +367,135 @@ def _patch_to_dict(row: UpstreamPatch) -> Dict[str, Any]:
     }
 
 
+def _status_to_visual(status: str) -> str:
+    low = (status or "").strip().lower()
+    if low in {"merged", "accepted"}:
+        return "MERGED"
+    if low in {"under_review", "changes_requested"}:
+        return "REVIEWED_NOT_MERGED"
+    return "PENDING"
+
+
+def _series_row_to_dict(row: UpstreamSeries) -> Dict[str, Any]:
+    def _j(raw: str, fallback):
+        try:
+            return json.loads(raw) if raw else fallback
+        except Exception:
+            return fallback
+
+    return {
+        "id": row.id,
+        "title": row.title or "",
+        "status": row.status or "PENDING",
+        "versions": _j(row.versions, []),
+        "version_count": int(row.version_count or 1),
+        "final_patch_count": int(row.final_patch_count or 0),
+        "v1_posted": row.v1_posted,
+        "vN_posted": row.vN_posted,
+        "days_to_merge": row.days_to_merge,
+        "apply_date": row.apply_date,
+        "days_to_apply": row.days_to_apply,
+        "apply_basis": row.apply_basis,
+        "maintainer_delay_days": row.maintainer_delay_days,
+        "reviewed_by_count": int(row.reviewed_by_count or 0),
+        "first_review_date": row.first_review_date,
+        "days_to_first_review": row.days_to_first_review,
+        "reviewers": _j(row.reviewers, []),
+        "added_lines": int(row.added_lines or 0),
+        "removed_lines": int(row.removed_lines or 0),
+        "net_lines": int(row.net_lines or 0),
+        "commit_shas": _j(row.commit_shas, []),
+        "lore_url": row.lore_url or "",
+        "fetch_mode": row.fetch_mode or "live",
+        "last_updated": row.last_updated,
+    }
+
+
+def _upsert_series_cache(series: list[dict[str, Any]], fetch_mode: str, last_updated: str) -> None:
+    for item in series:
+        sid = str(item.get("id") or "")
+        if not sid:
+            continue
+        row = UpstreamSeries.query.get(sid)
+        if not row:
+            row = UpstreamSeries(id=sid)
+            db.session.add(row)
+        row.title = item.get("title")
+        row.status = item.get("status")
+        row.versions = json.dumps(item.get("versions") or [])
+        row.version_count = int(item.get("version_count") or 1)
+        row.final_patch_count = int(item.get("final_patch_count") or 0)
+        row.v1_posted = item.get("v1_posted")
+        row.vN_posted = item.get("vN_posted")
+        row.days_to_merge = item.get("days_to_merge")
+        row.apply_date = item.get("apply_date")
+        row.days_to_apply = item.get("days_to_apply")
+        row.apply_basis = item.get("apply_basis")
+        row.maintainer_delay_days = item.get("maintainer_delay_days")
+        row.reviewed_by_count = int(item.get("reviewed_by_count") or 0)
+        row.first_review_date = item.get("first_review_date")
+        row.days_to_first_review = item.get("days_to_first_review")
+        row.reviewers = json.dumps(item.get("reviewers") or [])
+        row.added_lines = int(item.get("added_lines") or 0)
+        row.removed_lines = int(item.get("removed_lines") or 0)
+        row.net_lines = int(item.get("net_lines") or 0)
+        row.commit_shas = json.dumps(item.get("commit_shas") or [])
+        row.lore_url = item.get("lore_url")
+        row.fetch_mode = fetch_mode
+        row.last_updated = last_updated
+    db.session.commit()
+
+
+def _live_series_from_db(author_email: str) -> list[dict[str, Any]]:
+    rows = UpstreamPatch.query.order_by(UpstreamPatch.created_at.desc()).all()
+    raw_rows: list[dict[str, Any]] = []
+    status_by_id: dict[str, str] = {}
+    for row in rows:
+        sid = f"live-{row.id}"
+        status_by_id[sid] = row.status or "submitted"
+        raw_rows.append(
+            {
+                "id": sid,
+                "title": row.title or row.lore_url or f"Patch {row.id}",
+                "lore_url": row.lore_url or "",
+                "url": row.lore_url or "",
+                "date": (row.submitted_at or row.created_at or datetime.utcnow()).isoformat(),
+                "summary": (row.reviewer_comments or "") + " " + (row.tags or ""),
+                "messages": [
+                    {
+                        "subject": row.title or "",
+                        "body": (row.reviewer_comments or "") + " " + (row.tags or ""),
+                        "date": (row.submitted_at or row.created_at or datetime.utcnow()).isoformat(),
+                        "is_patch": True,
+                    }
+                ],
+            }
+        )
+
+    enriched = enrich_series(raw_rows, author_email)
+    for item in enriched:
+        raw_status = status_by_id.get(str(item.get("id")))
+        if raw_status:
+            item["status"] = _status_to_visual(raw_status)
+    return enriched
+
+
+def _stats_payload(series: list[dict[str, Any]], fetch_mode: str, author: str) -> dict[str, Any]:
+    timestamp = datetime.utcnow().isoformat() + "Z"
+    summary = summary_from_series(series)
+    return {
+        "series": series,
+        "summary": summary,
+        "fetch_mode": fetch_mode,
+        "last_updated": timestamp,
+        "author": author,
+    }
+
+
 @upstream_bp.get("/upstream")
 @upstream_bp.get("/upstream/")
 def upstream_home():
-    return render_template("upstream.html")
+    return render_template("upstream.html", author_email=_primary_email() or _default_submitter())
 
 
 @upstream_bp.get("/api/upstream/list")
@@ -378,14 +506,79 @@ def upstream_list():
 
 @upstream_bp.get("/api/upstream/stats")
 def upstream_stats():
-    rows = UpstreamPatch.query.all()
-    stats = {"total": len(rows)}
-    for status in STATUS_VALUES:
-        stats[status] = 0
-    for row in rows:
-        key = row.status or "submitted"
-        stats[key] = stats.get(key, 0) + 1
-    return jsonify(stats)
+    mode = str(request.args.get("mode", "live")).strip().lower()
+    author = _primary_email() or _default_submitter()
+
+    if mode == "offline":
+        cache = UpstreamOfflineCache.query.order_by(UpstreamOfflineCache.id.desc()).first()
+        if cache and cache.series_json:
+            try:
+                series = json.loads(cache.series_json)
+            except Exception:
+                series = []
+            payload = _stats_payload(series, "offline", cache.author or author)
+            payload["offline_filename"] = cache.filename or ""
+            payload["last_updated"] = cache.uploaded_at or payload["last_updated"]
+            return jsonify(payload)
+        return jsonify(_stats_payload([], "offline", author))
+
+    series = _live_series_from_db(author)
+    payload = _stats_payload(series, "live", author)
+    _upsert_series_cache(series, "live", payload["last_updated"])
+    return jsonify(payload)
+
+
+@upstream_bp.get("/api/upstream/summary")
+def upstream_summary():
+    mode = str(request.args.get("mode", "live")).strip().lower()
+    stats = upstream_stats().get_json() or {}
+    return jsonify(
+        {
+            "summary": stats.get("summary", {}),
+            "fetch_mode": mode,
+            "last_updated": stats.get("last_updated"),
+            "author": stats.get("author", _primary_email() or _default_submitter()),
+        }
+    )
+
+
+@upstream_bp.post("/api/upstream/upload-mbox")
+def upstream_upload_mbox():
+    incoming = request.files.get("mbox_file")
+    if not incoming:
+        return jsonify({"error": "mbox_file is required"}), 400
+
+    filename = secure_filename(incoming.filename or "").strip()
+    low_name = filename.lower()
+    if not (low_name.endswith(".mbox") or low_name.endswith(".mbox.gz") or low_name.endswith(".gz")):
+        return jsonify({"error": "Only .mbox or .mbox.gz files are supported"}), 400
+
+    target_dir = Path("/tmp/akdw_upstream_uploads")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / f"{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{filename}"
+    incoming.save(str(target))
+
+    author = _primary_email() or _default_submitter()
+    try:
+        series = parse_mbox_gz(str(target), author)
+    except Exception as exc:
+        return jsonify({"error": f"Failed to parse mbox: {exc}"}), 500
+
+    uploaded_at = datetime.utcnow().isoformat() + "Z"
+    cache = UpstreamOfflineCache(
+        filename=filename,
+        author=author,
+        uploaded_at=uploaded_at,
+        series_json=json.dumps(series),
+    )
+    db.session.add(cache)
+    db.session.commit()
+
+    _upsert_series_cache(series, "offline", uploaded_at)
+    payload = _stats_payload(series, "offline", author)
+    payload["offline_filename"] = filename
+    payload["last_updated"] = uploaded_at
+    return jsonify(payload)
 
 
 @upstream_bp.get("/api/upstream/emails")
