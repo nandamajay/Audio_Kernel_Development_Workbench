@@ -263,6 +263,7 @@ const AKDW_Sessions = (() => {
 
     window.setInterval(() => {
       loadSavedHosts();
+      restoreActiveSessions();
     }, 60000);
 
     document.addEventListener('visibilitychange', () => {

@@ -10,6 +10,7 @@ import logging
 import os
 import socket
 import threading
+import errno
 from typing import Dict, Optional
 
 import eventlet
@@ -32,6 +33,7 @@ class SSHSession:
         self.client: Optional[paramiko.SSHClient] = None
         self.channel = None
         self.reader_thread: Optional[threading.Thread] = None
+        self.reader_lock = threading.Lock()
         self.active = False
         self.hostname: Optional[str] = None
         self.username: Optional[str] = None
@@ -97,6 +99,10 @@ class SSHSession:
 
     def start_pty_reader(self) -> None:
         """Start background PTY read loop and emit terminal output events."""
+        with self.reader_lock:
+            if self.reader_thread and self.reader_thread.is_alive():
+                return
+            self.active = True
 
         def _read_loop() -> None:
             import select
@@ -130,12 +136,29 @@ class SSHSession:
                             room=self.session_id,
                         )
                         break
+                except socket.timeout:
+                    # Non-fatal timeout on non-blocking channels.
+                    continue
+                except OSError as exc:
+                    # Transient non-fatal readiness mismatch.
+                    if exc.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
+                        continue
+                    if self.active:
+                        logger.error("PTY OS error [%s]: %s", self.session_id, exc)
+                    break
                 except Exception as exc:  # noqa: BLE001
+                    text = str(exc).lower()
+                    if "timed out" in text or "would block" in text:
+                        continue
                     if self.active:
                         logger.error("PTY read error [%s]: %s", self.session_id, exc)
                     break
 
-            self.active = False
+            self.active = bool(
+                self.channel is not None
+                and not getattr(self.channel, "closed", False)
+                and not self.channel.exit_status_ready()
+            )
             logger.info("PTY reader stopped for session %s", self.session_id)
 
         self.reader_thread = threading.Thread(
@@ -147,10 +170,16 @@ class SSHSession:
 
     def send(self, data: str) -> None:
         """Forward user input to remote PTY."""
-        if not self.channel or not self.active:
+        if not self.channel:
+            return
+        if getattr(self.channel, "closed", False):
+            self.active = False
             return
         try:
             self.channel.send(data)
+            self.active = True
+            if not self.reader_thread or not self.reader_thread.is_alive():
+                self.start_pty_reader()
         except Exception as exc:  # noqa: BLE001
             logger.error("Send error [%s]: %s", self.session_id, exc)
 

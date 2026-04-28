@@ -261,6 +261,8 @@ const AKDW_Terminal = (() => {
     if (meta.hostname) {
       updateStatusBar(sessionId, meta.hostname, meta.username || '');
     }
+    // Wake prompt on page reload/navigation return, mimicking manual Enter.
+    emitWithSocketReady('terminal_input', { session_id: sessionId, data: '\n' });
   }
 
   function showSession(sessionId) {
