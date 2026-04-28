@@ -12,6 +12,7 @@ import socket
 import threading
 from typing import Dict, Optional
 
+import eventlet
 import paramiko
 from flask_socketio import SocketIO
 
@@ -65,7 +66,8 @@ class SSHSession:
                 if os.path.exists(expanded):
                     connect_kwargs["key_filename"] = expanded
 
-            self.client.connect(**connect_kwargs)
+            with eventlet.Timeout(25):
+                self.client.connect(**connect_kwargs)
             self.channel = self.client.invoke_shell(
                 term="xterm-256color",
                 width=220,
@@ -85,6 +87,9 @@ class SSHSession:
             logger.error("SSH error for %s@%s: %s", username, hostname, exc)
             return {"success": False, "message": f"SSH error: {exc}"}
         except socket.timeout:
+            return {"success": False, "message": f"Connection timed out to {hostname}:{port}"}
+        except eventlet.timeout.Timeout:
+            logger.error("Timed out connecting to %s@%s", username, hostname)
             return {"success": False, "message": f"Connection timed out to {hostname}:{port}"}
         except Exception as exc:  # noqa: BLE001
             logger.error("Unexpected error connecting to %s: %s", hostname, exc)

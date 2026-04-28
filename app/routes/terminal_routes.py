@@ -82,6 +82,12 @@ def register_terminal_socketio_handlers(sio):
         session_id = (payload.get("session_id") or "").strip() or str(uuid.uuid4())[:8]
         hostname = (payload.get("hostname") or "").strip()
         username = (payload.get("username") or "").strip()
+        current_app.logger.info(
+            "terminal_connect start session=%s host=%s user=%s",
+            session_id,
+            hostname,
+            username,
+        )
         if not hostname or not username:
             emit(
                 "terminal_error",
@@ -102,6 +108,12 @@ def register_terminal_socketio_handlers(sio):
         )
         if result.get("success"):
             sess.start_pty_reader()
+            current_app.logger.info(
+                "terminal_connect success session=%s host=%s user=%s",
+                session_id,
+                hostname,
+                username,
+            )
             sio.emit(
                 "terminal_connected",
                 {
@@ -115,6 +127,13 @@ def register_terminal_socketio_handlers(sio):
             return
 
         close_ssh_session(session_id)
+        current_app.logger.warning(
+            "terminal_connect failure session=%s host=%s user=%s msg=%s",
+            session_id,
+            hostname,
+            username,
+            result.get("message") or "Connection failed",
+        )
         sio.emit(
             "terminal_error",
             {"session_id": session_id, "message": result.get("message") or "Connection failed"},

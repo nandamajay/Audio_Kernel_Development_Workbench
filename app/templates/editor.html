@@ -3,8 +3,8 @@
 
 {% block head %}
 {{ super() }}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/terminal/akdw_terminal.css', v='20260428b') }}">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css"/>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/terminal/akdw_terminal.css', v='20260428c') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/xterm/xterm.css', v='20260428c') }}"/>
 {% endblock %}
 
 {% block content %}
@@ -134,12 +134,12 @@
 
 {% block scripts %}
 {{ super() }}
-<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
-<script src="{{ url_for('static', filename='js/terminal/akdw_terminal.js', v='20260428b') }}"></script>
-<script src="{{ url_for('static', filename='js/terminal/akdw_sessions.js', v='20260428b') }}"></script>
-<script src="{{ url_for('static', filename='js/terminal/akdw_qgenie_drawer.js', v='20260428b') }}"></script>
+<script src="{{ url_for('static', filename='vendor/socketio/socket.io.min.js', v='20260428c') }}"></script>
+<script src="{{ url_for('static', filename='vendor/xterm/xterm.js', v='20260428c') }}"></script>
+<script src="{{ url_for('static', filename='vendor/xterm/xterm-addon-fit.js', v='20260428c') }}"></script>
+<script src="{{ url_for('static', filename='js/terminal/akdw_terminal.js', v='20260428c') }}"></script>
+<script src="{{ url_for('static', filename='js/terminal/akdw_sessions.js', v='20260428c') }}"></script>
+<script src="{{ url_for('static', filename='js/terminal/akdw_qgenie_drawer.js', v='20260428c') }}"></script>
 <script>
   (function () {
     function esc(s) {

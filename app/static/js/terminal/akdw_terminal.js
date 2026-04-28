@@ -49,6 +49,10 @@ const AKDW_Terminal = (() => {
   function initSocket() {
     if (socket) return socket;
 
+    if (typeof window.io !== 'function') {
+      throw new Error('Socket.IO client is not loaded');
+    }
+
     socket = io({
       transports: ['polling', 'websocket'],
       upgrade: true,
@@ -154,6 +158,10 @@ const AKDW_Terminal = (() => {
     initSocket();
     if (terminals[sessionId]) return terminals[sessionId];
 
+    if (typeof window.Terminal === 'undefined') {
+      throw new Error('xterm.js failed to load');
+    }
+
     const term = new Terminal({
       theme: MOBATERM_THEME,
       fontFamily: '"Cascadia Code", "Fira Code", "JetBrains Mono", monospace',
@@ -210,8 +218,15 @@ const AKDW_Terminal = (() => {
   }
 
   function connectSession(sessionId, connectionData) {
-    createTerminal(sessionId);
-    showSession(sessionId);
+    try {
+      createTerminal(sessionId);
+      showSession(sessionId);
+    } catch (err) {
+      const errorMessage = (err && err.message) || 'Terminal initialization failed';
+      showConnectError(errorMessage);
+      if (window.AKDW_Sessions) AKDW_Sessions.onError(sessionId, errorMessage);
+      return;
+    }
 
     clearPendingConnect(sessionId);
     pendingConnectTimers[sessionId] = window.setTimeout(() => {
@@ -485,13 +500,24 @@ function doConnect() {
     AKDW_Sessions.saveCurrentHost(hostname, port, username, hostname);
   }
 
-  AKDW_Terminal.connectSession(sessionId, {
-    hostname,
-    port,
-    username,
-    password,
-    key_path: keyPath || null
-  });
+  try {
+    AKDW_Terminal.connectSession(sessionId, {
+      hostname,
+      port,
+      username,
+      password,
+      key_path: keyPath || null
+    });
+  } catch (err) {
+    const message = (err && err.message) || 'Terminal connect call failed';
+    const s = document.getElementById('connect-status');
+    if (s) {
+      s.textContent = 'Error: ' + message;
+      s.className = 'connect-status error';
+      s.classList.remove('hidden');
+    }
+    if (window.AKDW_Sessions) AKDW_Sessions.onError(sessionId, message);
+  }
 }
 
 function quickConnect(hostname) {
