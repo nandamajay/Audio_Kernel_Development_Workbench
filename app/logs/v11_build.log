@@ -1,0 +1,531 @@
+===== P4 S0 PRE-FLIGHT 2026-04-28T09:59:43+05:30 =====
+--- app/routes/upstream.py
+"""Upstream patch tracker routes."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from datetime import datetime
+from email.utils import parsedate_to_datetime
+from typing import Any, Dict
+from urllib.parse import quote
+import xml.etree.ElementTree as ET
+
+import requests
+from bs4 import BeautifulSoup
+from flask import Blueprint, current_app, jsonify, render_template, request
+
+from app.config import get_default_model
+from app.models import UpstreamPatch, db
+from app.services.activity_service import log_activity
+from app.services.env_service import resolve_ssl_verify
+from app.services.settings_service import get_json_setting, get_setting, save_setting
+
+
+upstream_bp = Blueprint("upstream", __name__)
+
+STATUS_VALUES = {
+    "submitted",
+    "under_review",
+    "changes_requested",
+    "accepted",
+    "merged",
+    "superseded",
+    "rejected",
+}
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+LORE_FEED = "https://lore.kernel.org/all/?q=f:{email}&x=A"
+PATCHWORK_API = "https://patchwork.kernel.org/api/patches/?submitter={email}&format=json"
+
+
+def _verify_value() -> bool | str:
+    return resolve_ssl_verify(
+        ssl_verify_raw=current_app.config.get("QGENIE_SSL_VERIFY", "true"),
+        ca_bundle=current_app.config.get("QGENIE_CA_BUNDLE", ""),
+    )
+
+
+def _to_dt(raw: str) -> datetime | None:
+    try:
+        dt = parsedate_to_datetime(raw)
+        if dt:
+            return dt.replace(tzinfo=None)
+    except Exception:
+        return None
+    return None
+
+
+def _infer_subsystem(title: str) -> str:
+    low = (title or "").lower()
+    if "asoc" in low or "sound" in low or "codec" in low:
+        return "ASoC"
+    if "usb" in low:
+        return "USB"
+    if "net" in low:
+        return "Networking"
+    if "arm64" in low:
+        return "arm64"
+    return "Kernel"
+
+
+def _detect_source(url: str) -> str:
+    low = (url or "").lower()
+    if "lore.kernel.org" in low:
+        return "lore"
+    if "github.com" in low:
+        return "github"
+    if "gerrit" in low:
+        return "gerrit"
+    return "unknown"
+
+
+def _default_submitter() -> str:
+    # Prefer configured settings/env; fall back to known submitter address.
+    values = {
+        os.environ.get("USER_EMAIL", "").strip(),
+        os.environ.get("QGENIE_USER_EMAIL", "").strip(),
+        "ajay.nandam@oss.qualcomm.com",
+    }
+    for value in values:
+        if value and "@" in value:
+            return value
+    return "ajay.nandam@oss.qualcomm.com"
+
+
+def _primary_email() -> str:
+    email = (get_setting("user_email", "") or "").strip()
+    if EMAIL_RE.match(email):
+        return email
+    display = os.environ.get("USER_DISPLAY_NAME", "").strip()
+    if "@" in display and EMAIL_RE.match(display):
+        return display
+    fallback = _default_submitter()
+    return fallback if EMAIL_RE.match(fallback) else ""
+
+
+def _tracked_emails() -> list[str]:
+    emails_raw = get_json_setting("upstream_tracked_emails", [])
+    emails: list[str] = []
+    if isinstance(emails_raw, list):
+        for item in emails_raw:
+            candidate = str(item or "").strip()
+            if EMAIL_RE.match(candidate) and candidate not in emails:
+                emails.append(candidate)
+    primary = _primary_email()
+    if primary and primary not in emails:
+        emails.insert(0, primary)
+    return emails
+
+
+def _persist_tracked_emails(emails: list[str]) -> None:
+    normalized: list[str] = []
+    for item in emails:
+        candidate = str(item or "").strip()
+        if EMAIL_RE.match(candidate) and candidate not in normalized:
+            normalized.append(candidate)
+    save_setting("upstream_tracked_emails", json.dumps(normalized))
+
+
+def _dedupe_patches(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen = set()
+    deduped = []
+    for row in rows:
+        subject = str(row.get("subject", "")).strip()
+        date = str(row.get("date", "")).strip()
+        key = (subject[:80].lower(), date[:10], str(row.get("msgid", ""))[:120])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+    return deduped
+
+
+def _fetch_patchwork_by_email(email: str, verify: bool | str) -> list[dict[str, Any]]:
+    patches: list[dict[str, Any]] = []
+    try:
+        res = requests.get(
+            PATCHWORK_API.format(email=quote(email)),
+            timeout=12,
+            verify=verify,
+            headers={"User-Agent": "AKDW/1.0"},
+        )
+        if res.status_code != 200:
+            return patches
+        payload = res.json()
+        if not isinstance(payload, list):
+            return patches
+        for item in payload[:80]:
+            project = item.get("project") if isinstance(item.get("project"), dict) else {}
+            patches.append(
+                {
+                    "subject": item.get("name", ""),
+                    "date": item.get("date", ""),
+                    "list": project.get("name", ""),
+                    "state": item.get("state", "unknown"),
+                    "url": item.get("web_url", ""),
+                    "msgid": item.get("msgid", ""),
+                    "source": "patchwork",
+                }
+            )
+    except Exception:
+        return patches
+    return patches
+
+
+def _fetch_lore_by_email(email: str, verify: bool | str) -> list[dict[str, Any]]:
+    patches: list[dict[str, Any]] = []
+    try:
+        res = requests.get(
+            LORE_FEED.format(email=quote(email)),
+            timeout=12,
+            verify=verify,
+            headers={"User-Agent": "AKDW/1.0"},
+        )
+        res.raise_for_status()
+        root = ET.fromstring(res.text)
+        ns = {"atom": "http://www.w3.org/2005/Atom"}
+        entries = root.findall("atom:entry", ns)
+        for entry in entries[:60]:
+            title = (entry.findtext("atom:title", default="", namespaces=ns) or "").strip()
+            published = (entry.findtext("atom:published", default="", namespaces=ns) or "").strip()
+            msgid = (entry.findtext("atom:id", default="", namespaces=ns) or "").strip()
+            link_node = entry.find("atom:link", ns)
+            link = (link_node.get("href") if link_node is not None else "") or ""
+            category = entry.find("atom:category", ns)
+            list_name = (category.get("term") if category is not None else "") or ""
+            patches.append(
+                {
+                    "subject": title,
+                    "date": published,
+                    "list": list_name,
+                    "state": "unknown",
+                    "url": link,
+                    "msgid": msgid,
+                    "source": "lore",
+                }
+            )
+    except Exception:
+        return patches
+    return patches
+
+
+def _infer_status(text_blob: str, reply_count: int) -> str:
+    low = (text_blob or "").lower()
+    if "rejected" in low or "nacked-by" in low:
+        return "rejected"
+    if "merged" in low or "applied" in low:
+        return "merged"
+    if "accepted" in low:
+        return "accepted"
+    if "changes requested" in low or "please fix" in low or "please resend" in low:
+--- app/templates/upstream.html
+{% extends "base.html" %}
+{% block title %}Upstream Tracker{% endblock %}
+
+{% block head %}
+<style>
+  .upstream-shell {
+    display: grid;
+    gap: 12px;
+  }
+
+  .upstream-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    background: var(--gradient-card);
+    padding: 18px;
+  }
+
+  .upstream-header h1 {
+    margin: 0;
+    font-size: 1.5rem;
+  }
+
+  .upstream-header p {
+    margin: 4px 0 0;
+    color: var(--text-muted);
+  }
+
+  .upstream-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .status-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    background: rgba(255,255,255,0.03);
+  }
+
+  .status-chip {
+    border: 1px solid var(--glass-border);
+    border-radius: 999px;
+    background: rgba(255,255,255,0.04);
+    color: var(--text-primary);
+    font-size: 12px;
+    padding: 5px 10px;
+    cursor: pointer;
+  }
+
+  .status-chip.active {
+    border-color: var(--accent-blue);
+    box-shadow: var(--shadow-glow);
+  }
+
+  .upstream-tools {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .upstream-email-bar {
+    display: grid;
+    gap: 8px;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    background: rgba(255,255,255,0.03);
+    padding: 12px;
+  }
+
+  .email-select-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .email-select-chip {
+    border: 1px solid var(--glass-border);
+    border-radius: 999px;
+    background: rgba(255,255,255,0.05);
+    color: var(--text-primary);
+    font-size: 12px;
+    padding: 4px 10px;
+    cursor: pointer;
+  }
+
+  .email-select-chip.active {
+    border-color: var(--accent-blue);
+    box-shadow: var(--shadow-glow);
+  }
+
+  .quick-add-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+  }
+
+  .patches-table-container {
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    overflow: hidden;
+    background: rgba(255,255,255,0.02);
+  }
+
+  .patches-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .patches-table th,
+  .patches-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .patch-subject {
+    max-width: 500px;
+  }
+
+  .patch-badge {
+    border: 1px solid var(--glass-border);
+    border-radius: 999px;
+    padding: 3px 8px;
+    white-space: nowrap;
+  }
+
+  .source-tag {
+    border: 1px solid var(--glass-border);
+    border-radius: 999px;
+    font-size: 11px;
+    padding: 2px 6px;
+  }
+
+  .source-patchwork { color: #93c5fd; }
+  .source-lore { color: #d8b4fe; }
+
+  .fetch-meta {
+    padding: 8px 10px;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .upstream-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .upstream-card {
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    background: rgba(255,255,255,0.03);
+    padding: 12px;
+    display: grid;
+    gap: 8px;
+  }
+
+  .upstream-card-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .upstream-title {
+    font-weight: 600;
+  }
+
+  .upstream-links {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 12px;
+  }
+
+  .upstream-links a,
+  .upstream-links button {
+    color: var(--accent-blue);
+    text-decoration: underline;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+  }
+
+  .upstream-meta {
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .upstream-actions-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .upstream-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    display: none;
+    place-items: center;
+    background: rgba(1, 4, 9, 0.65);
+  }
+
+  .upstream-modal.open {
+    display: grid;
+  }
+
+  .upstream-modal-card {
+    width: min(620px, 92vw);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    background: var(--bg-secondary);
+    padding: 14px;
+    display: grid;
+    gap: 10px;
+  }
+
+  .upstream-modal-card h3 {
+    margin: 0;
+  }
+
+  @media (max-width: 900px) {
+    .upstream-header {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    .upstream-tools {
+      flex-direction: column;
+      align-items: stretch;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="upstream-shell upstream-tracker">
+  <div class="upstream-header">
+    <div>
+      <h1>📬 Upstream Patch Tracker</h1>
+      <p>Track your kernel patches on lore.kernel.org</p>
+    </div>
+    <div class="upstream-actions">
+      <button class="btn-primary" type="button" onclick="openAddModal()">+ Add Patch</button>
+      <button class="btn-secondary" type="button" onclick="refreshAll()">🔄 Refresh All</button>
+    </div>
+  </div>
+
+  <div class="upstream-email-bar">
+--- static/js upstream files
+--- static/css upstream files
+--- scripts upstream files
+--- pip show chart.js
+chart.js is frontend only
+--- pip show chardet
+Name: chardet
+Version: 4.0.0
+Summary: Universal encoding detector for Python 2 and 3
+Home-page: https://github.com/chardet/chardet
+Author: Mark Pilgrim
+Author-email: mark@diveintomark.org
+License: LGPL
+Location: /usr/lib/python3/dist-packages
+Requires: 
+Required-by: 
+--- route grep upstream
+app/routes/upstream.py.bak:upstream_bp = Blueprint("upstream", __name__)
+app/routes/upstream.py.bak:    emails_raw = get_json_setting("upstream_tracked_emails", [])
+app/routes/upstream.py.bak:    save_setting("upstream_tracked_emails", json.dumps(normalized))
+app/routes/upstream.py.bak:@upstream_bp.get("/upstream")
+app/routes/upstream.py.bak:@upstream_bp.get("/upstream/")
+app/routes/upstream.py.bak:def upstream_home():
+app/routes/upstream.py.bak:    return render_template("upstream.html")
+app/routes/upstream.py.bak:@upstream_bp.get("/api/upstream/list")
+app/routes/upstream.py.bak:def upstream_list():
+app/routes/upstream.py.bak:@upstream_bp.get("/api/upstream/stats")
+app/routes/upstream.py.bak:def upstream_stats():
+app/routes/upstream.py.bak:@upstream_bp.get("/api/upstream/emails")
+app/routes/upstream.py.bak:@upstream_bp.post("/api/upstream/emails")
+app/routes/upstream.py.bak:@upstream_bp.delete("/api/upstream/emails")
+app/routes/upstream.py.bak:@upstream_bp.get("/api/upstream/fetch")
+app/routes/upstream.py.bak:@upstream_bp.post("/api/upstream/add")
+app/routes/upstream.py.bak:def upstream_add():
+app/routes/upstream.py.bak:    log_activity("Added patch to tracker: " + (row.title or row.lore_url or "")[:120], "upstream")
+app/routes/upstream.py.bak:@upstream_bp.put("/api/upstream/<int:patch_id>")
+app/routes/upstream.py.bak:def upstream_update(patch_id: int):
+app/routes/upstream.py.bak:@upstream_bp.delete("/api/upstream/<int:patch_id>")
+app/routes/upstream.py.bak:def upstream_delete(patch_id: int):
+app/routes/upstream.py.bak:@upstream_bp.post("/api/upstream/<int:patch_id>/refresh")
+app/routes/upstream.py.bak:def upstream_refresh(patch_id: int):
+app/routes/upstream.py:upstream_bp = Blueprint("upstream", __name__)
+app/routes/upstream.py:    emails_raw = get_json_setting("upstream_tracked_emails", [])
+app/routes/upstream.py:    save_setting("upstream_tracked_emails", json.dumps(normalized))
+app/routes/upstream.py:@upstream_bp.get("/upstream")
+app/routes/upstream.py:@upstream_bp.get("/upstream/")
+app/routes/upstream.py:def upstream_home():
+--- locate stats23
