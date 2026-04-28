@@ -53,6 +53,8 @@ class SSHSession:
                 "port": int(port),
                 "username": username,
                 "timeout": 15,
+                "auth_timeout": 15,
+                "banner_timeout": 15,
                 "look_for_keys": True,
                 "allow_agent": True,
             }

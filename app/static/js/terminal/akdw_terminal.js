@@ -50,10 +50,19 @@ const AKDW_Terminal = (() => {
     if (socket) return socket;
 
     socket = io({
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'],
+      upgrade: true,
       reconnection: true,
       reconnectionAttempts: 6,
       timeout: 10000
+    });
+
+    socket.on('connect', () => {
+      // no-op: connection is used by emitWithSocketReady when needed
+    });
+
+    socket.on('disconnect', (reason) => {
+      showConnectError('Socket disconnected: ' + (reason || 'unknown'));
     });
 
     socket.on('connect_error', (err) => {
@@ -116,6 +125,31 @@ const AKDW_Terminal = (() => {
     return socket;
   }
 
+  function emitWithSocketReady(eventName, payload) {
+    initSocket();
+    if (socket.connected) {
+      socket.emit(eventName, payload);
+      return;
+    }
+
+    const onConnect = () => {
+      socket.off('connect_error', onConnectError);
+      socket.emit(eventName, payload);
+    };
+    const onConnectError = (err) => {
+      socket.off('connect', onConnect);
+      showConnectError('Socket.IO connection failed: ' + ((err && err.message) || 'transport error'));
+    };
+
+    socket.once('connect', onConnect);
+    socket.once('connect_error', onConnectError);
+    try {
+      socket.connect();
+    } catch (_err) {
+      // no-op
+    }
+  }
+
   function createTerminal(sessionId, options = {}) {
     initSocket();
     if (terminals[sessionId]) return terminals[sessionId];
@@ -163,7 +197,7 @@ const AKDW_Terminal = (() => {
       }
     });
 
-    socket.emit('terminal_join', { session_id: sessionId });
+    emitWithSocketReady('terminal_join', { session_id: sessionId });
 
     terminals[sessionId] = { term, fitAddon, el };
 
@@ -189,7 +223,7 @@ const AKDW_Terminal = (() => {
       if (window.AKDW_Sessions) AKDW_Sessions.onError(sessionId, 'Connection timeout');
     }, 15000);
 
-    socket.emit('terminal_connect', {
+    emitWithSocketReady('terminal_connect', {
       session_id: sessionId,
       hostname: connectionData.hostname,
       port: connectionData.port,
