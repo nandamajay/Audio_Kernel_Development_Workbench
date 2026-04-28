@@ -38,6 +38,21 @@ window.AKDWPatchwise = (function () {
     });
   }
 
+  function ansiToHtml(text) {
+    let html = escapeHtml(text || "");
+    html = html
+      .replace(/\x1b\[0m/g, "</span>")
+      .replace(/\x1b\[31m/g, '<span class="ansi-red">')
+      .replace(/\x1b\[32m/g, '<span class="ansi-green">')
+      .replace(/\x1b\[33m/g, '<span class="ansi-yellow">')
+      .replace(/\x1b\[34m/g, '<span class="ansi-blue">')
+      .replace(/\x1b\[[0-9;]*m/g, "");
+    if (html.indexOf("<span") !== -1 && !html.trim().endsWith("</span>")) {
+      html += "</span>";
+    }
+    return html;
+  }
+
   function linkifyText(text) {
     return (text || "").replace(
       /(https?:\/\/[^\s<>"]+)/g,
@@ -691,6 +706,16 @@ window.AKDWPatchwise = (function () {
       ].join("");
       stepsBox.appendChild(card);
     });
+
+    const checkpatchStep = steps.find(function (step) { return step.id === "checkpatch"; });
+    if (checkpatchStep) {
+      updateCheckpatchPanel({
+        status: (checkpatchStep.status || "").toLowerCase(),
+        warnings: checkpatchStep.warnings_count || 0,
+        errors: checkpatchStep.errors_count || 0,
+        output: checkpatchStep.output_preview || "",
+      });
+    }
   }
 
   function renderPipelineJobProgress(job) {
@@ -1207,15 +1232,103 @@ window.AKDWPatchwise = (function () {
   async function runCheckpatch() {
     const patchContent = document.getElementById("patchContent").value;
     if (!patchContent.trim()) return;
-    const res = await fetch("/api/patchwise/run_checkpatch", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId, patch_content: patchContent }),
-    });
-    const data = await res.json();
-    const out = data.output || "";
-    const summary = "checkpatch warnings: " + (data.warnings_count || 0) + ", errors: " + (data.errors_count || 0);
-    document.getElementById("checkpatchOutput").textContent = summary + (out ? "\n" + out.slice(0, 4000) : "");
+    const btn = document.getElementById("runCheckpatchBtn");
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="btn-spinner"></span>Running Checkpatch';
+    }
+    updateCheckpatchPanel({ status: "running", warnings: 0, errors: 0, output: "Running checkpatch..." });
+    try {
+      const res = await fetch("/api/patchwise/run_checkpatch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, patch_content: patchContent }),
+      });
+      const data = await res.json();
+      const out = data.output || "";
+      const notFound = /not found/i.test(out || data.error || "");
+      if (!data.ok) {
+        updateCheckpatchPanel({
+          status: "error",
+          warnings: 0,
+          errors: 0,
+          output: out || data.error || "checkpatch failed",
+          linkToSettings: notFound,
+        });
+        return;
+      }
+      updateCheckpatchPanel({
+        status: data.status || "pass",
+        warnings: data.warnings_count || 0,
+        errors: data.errors_count || 0,
+        output: out,
+      });
+    } catch (err) {
+      updateCheckpatchPanel({
+        status: "error",
+        warnings: 0,
+        errors: 0,
+        output: "checkpatch failed: " + (err && err.message ? err.message : "unknown error"),
+      });
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "⚙ Run Checkpatch";
+      }
+    }
+  }
+
+  function updateCheckpatchPanel(payload) {
+    const panel = document.getElementById("checkpatchPanel");
+    const badges = document.getElementById("checkpatchBadges");
+    const summaryLine = document.getElementById("checkpatchSummaryLine");
+    const outputEl = document.getElementById("checkpatchPanelOutput");
+    const miniOutput = document.getElementById("checkpatchOutput");
+    if (!panel || !badges || !summaryLine || !outputEl) return;
+
+    panel.classList.remove("collapsed");
+    const warnings = Number(payload.warnings || 0);
+    const errors = Number(payload.errors || 0);
+    const statusRaw = String(payload.status || "").toLowerCase();
+    let statusClass = "warn";
+    let statusLabel = "🔄 Running";
+    if (statusRaw === "error" || statusRaw === "fail") {
+      statusClass = "err";
+      statusLabel = "❌ Error";
+    } else if (statusRaw === "pass") {
+      statusClass = "pass";
+      statusLabel = "✅ Pass";
+    } else if (statusRaw === "warnings" || warnings > 0) {
+      statusClass = "warn";
+      statusLabel = "⚠️ Warnings";
+    } else if (statusRaw === "skip" || statusRaw === "skipped") {
+      statusClass = "warn";
+      statusLabel = "⚠️ Skipped";
+    }
+
+    badges.innerHTML = [
+      '<span class="checkpatch-badge ' + statusClass + '">' + statusLabel + "</span>",
+      '<span class="checkpatch-badge warn">Warnings: ' + warnings + "</span>",
+      '<span class="checkpatch-badge err">Errors: ' + errors + "</span>",
+    ].join("");
+
+    const needsLink = payload.linkToSettings || /not found/i.test(payload.output || "");
+    if (needsLink) {
+      summaryLine.innerHTML = 'checkpatch.pl not found. <a href="/settings" class="chat-link">Open Settings</a>';
+    } else {
+      summaryLine.textContent = "Warnings: " + warnings + " · Errors: " + errors;
+    }
+
+    const outputText = payload.output || "No output.";
+    outputEl.innerHTML = ansiToHtml(outputText);
+    if (miniOutput) {
+      miniOutput.textContent = "Checkpatch: warnings " + warnings + ", errors " + errors;
+    }
+  }
+
+  async function runFullPipeline() {
+    await runReview();
+    await runPipeline();
   }
 
   async function exportReport() {
@@ -1311,7 +1424,7 @@ window.AKDWPatchwise = (function () {
     });
 
     document.getElementById("runReviewBtn").addEventListener("click", runReview);
-    document.getElementById("runPipelineBtn").addEventListener("click", runPipeline);
+    document.getElementById("runPipelineBtn").addEventListener("click", runFullPipeline);
     document.getElementById("cancelPipelineBtn").addEventListener("click", cancelPipelineJob);
     document.getElementById("runCheckpatchBtn").addEventListener("click", runCheckpatch);
     document.getElementById("previewAutofixBtn").addEventListener("click", previewAutofix);
@@ -1320,11 +1433,18 @@ window.AKDWPatchwise = (function () {
     document.getElementById("exportBtn").addEventListener("click", exportReport);
     document.getElementById("placeholderRunBtn").addEventListener("click", runReview);
     document.getElementById("hintRunReviewBtn").addEventListener("click", runReview);
-    document.getElementById("hintRunPipelineBtn").addEventListener("click", runPipeline);
+    document.getElementById("hintRunPipelineBtn").addEventListener("click", runFullPipeline);
     document.getElementById("hintCheckpatchBtn").addEventListener("click", runCheckpatch);
     document.getElementById("pwAskBtn").addEventListener("click", askReviewer);
     document.getElementById("refreshAnalyticsBtn").addEventListener("click", loadAnalytics);
     document.getElementById("refreshPipelineHistoryBtn").addEventListener("click", loadPipelineHistory);
+    const toggle = document.getElementById("checkpatchToggle");
+    if (toggle) {
+      toggle.addEventListener("click", function () {
+        const panel = document.getElementById("checkpatchPanel");
+        if (panel) panel.classList.toggle("collapsed");
+      });
+    }
     document.getElementById("patchContent").addEventListener("input", function () {
       if (this.value.trim()) {
         setStepState(true, reviewStarted, hasResults, exportedReport);

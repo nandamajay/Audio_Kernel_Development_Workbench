@@ -380,6 +380,80 @@
     background: rgba(255,255,255,0.02);
   }
 
+  .checkpatch-panel {
+    margin-top: 14px;
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    overflow: hidden;
+  }
+
+  .checkpatch-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .checkpatch-summary {
+    padding: 10px 12px;
+    display: grid;
+    gap: 6px;
+  }
+
+  .checkpatch-output {
+    margin: 0;
+    padding: 12px;
+    max-height: 260px;
+    overflow: auto;
+    font-size: 12px;
+    background: rgba(0, 0, 0, 0.35);
+    border-top: 1px solid var(--glass-border);
+  }
+
+  .checkpatch-panel.collapsed .checkpatch-body {
+    display: none;
+  }
+
+  .checkpatch-badges {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .checkpatch-badge {
+    border-radius: 999px;
+    padding: 3px 8px;
+    font-size: 11px;
+    border: 1px solid transparent;
+  }
+
+  .checkpatch-badge.pass {
+    background: rgba(16, 185, 129, 0.16);
+    border-color: rgba(16, 185, 129, 0.45);
+    color: #b8f7df;
+  }
+
+  .checkpatch-badge.warn {
+    background: rgba(251, 191, 36, 0.16);
+    border-color: rgba(251, 191, 36, 0.45);
+    color: #fde68a;
+  }
+
+  .checkpatch-badge.err {
+    background: rgba(239, 68, 68, 0.16);
+    border-color: rgba(239, 68, 68, 0.45);
+    color: #fecaca;
+  }
+
+  .ansi-red { color: #fca5a5; }
+  .ansi-yellow { color: #fde68a; }
+  .ansi-green { color: #bbf7d0; }
+  .ansi-blue { color: #93c5fd; }
+
   .results-enter {
     opacity: 0;
     transform: translateY(10px);
@@ -672,6 +746,18 @@
         <button id="placeholderRunBtn" class="btn-primary" type="button">▶ Run AI Review</button>
       </div>
       <div id="reviewFindings"></div>
+      <div id="checkpatchPanel" class="checkpatch-panel collapsed">
+        <div id="checkpatchToggle" class="checkpatch-header">
+          <strong>Checkpatch Results</strong>
+          <div id="checkpatchBadges" class="checkpatch-badges">
+            <span id="checkpatchStatusBadge" class="checkpatch-badge">Idle</span>
+          </div>
+        </div>
+        <div class="checkpatch-body">
+          <div id="checkpatchSummaryLine" class="checkpatch-summary small-muted">Run checkpatch to see results.</div>
+          <pre id="checkpatchPanelOutput" class="checkpatch-output">No output yet.</pre>
+        </div>
+      </div>
 
       <div class="assistant-panel">
         <h4>QGenie Assistant</h4>
