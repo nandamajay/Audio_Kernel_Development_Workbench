@@ -199,11 +199,19 @@ const AKDW_Terminal = (() => {
       socket.emit('terminal_resize', { session_id: sessionId, cols, rows });
     });
 
-    term.onFocus(() => {
-      if (window.AKDW_INPUT_FOCUS === 'drawer') {
-        window.AKDW_INPUT_FOCUS = null;
-      }
-    });
+    if (typeof term.onFocus === 'function') {
+      term.onFocus(() => {
+        if (window.AKDW_INPUT_FOCUS === 'drawer') {
+          window.AKDW_INPUT_FOCUS = null;
+        }
+      });
+    } else if (term.textarea && typeof term.textarea.addEventListener === 'function') {
+      term.textarea.addEventListener('focus', () => {
+        if (window.AKDW_INPUT_FOCUS === 'drawer') {
+          window.AKDW_INPUT_FOCUS = null;
+        }
+      });
+    }
 
     emitWithSocketReady('terminal_join', { session_id: sessionId });
 
