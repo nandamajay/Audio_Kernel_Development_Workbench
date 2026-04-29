@@ -2,7 +2,7 @@
 
 from app.routes.agent import agent_bp
 from app.routes.api import api_bp
-from app.routes.converter import converter_bp
+from app.routes.converter import converter_api_bp, converter_bp
 from app.routes.dashboard import dashboard_bp
 from app.routes.editor import editor_bp
 from app.routes.evidence import evidence_bp
@@ -22,6 +22,7 @@ ALL_BLUEPRINTS = [
     patchwise_bp,
     upstream_bp,
     converter_bp,
+    converter_api_bp,
     triage_bp,
     agent_bp,
     terminal_bp,
