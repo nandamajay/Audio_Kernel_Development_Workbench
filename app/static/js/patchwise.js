@@ -38,6 +38,16 @@ window.AKDWPatchwise = (function () {
     });
   }
 
+  function showToast(message) {
+    const summary = document.getElementById("reviewSummary");
+    if (!summary) return;
+    summary.textContent = message || "";
+    summary.classList.add("results-enter");
+    setTimeout(function () {
+      summary.classList.remove("results-enter");
+    }, 1800);
+  }
+
   function ansiToHtml(text) {
     let html = escapeHtml(text || "");
     html = html
@@ -1444,6 +1454,20 @@ window.AKDWPatchwise = (function () {
         const panel = document.getElementById("checkpatchPanel");
         if (panel) panel.classList.toggle("collapsed");
       });
+    }
+
+    const pending = sessionStorage.getItem("workshop_pending_patch");
+    if (pending) {
+      sessionStorage.removeItem("workshop_pending_patch");
+      document.getElementById("patchContent").value = pending;
+      files = [{
+        name: "converter.patch",
+        size: pending.length,
+        content: pending,
+      }];
+      renderFiles();
+      setActionState();
+      showToast("✅ Patch loaded from Driver Converter");
     }
     document.getElementById("patchContent").addEventListener("input", function () {
       if (this.value.trim()) {

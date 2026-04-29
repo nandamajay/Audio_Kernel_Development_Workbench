@@ -8,6 +8,7 @@ import subprocess
 from datetime import datetime, timezone
 
 from flask import Blueprint, current_app, jsonify, render_template, request, url_for
+from sqlalchemy import inspect, text
 
 from app.config import (
     Config,
@@ -110,10 +111,20 @@ def dashboard_stats():
     merged = UpstreamPatch.query.filter(UpstreamPatch.status.in_(["merged", "accepted"])).count()
     in_review = UpstreamPatch.query.filter_by(status="under_review").count()
     needs_revision = UpstreamPatch.query.filter_by(status="changes_requested").count()
+    converted = 0
+    try:
+        inspector = inspect(db.engine)
+        if inspector.has_table("converter_jobs"):
+            result = db.session.execute(text("SELECT COUNT(*) FROM converter_jobs WHERE status = 'done'"))
+            converted = int(result.scalar() or 0)
+        else:
+            converted = ConversionJob.query.count()
+    except Exception:
+        converted = ConversionJob.query.count()
     return jsonify(
         {
             "patches_reviewed": ReviewSession.query.count(),
-            "drivers_converted": ConversionJob.query.count(),
+            "drivers_converted": converted,
             "triage_sessions": TriageSession.query.count(),
             "upstream_patches": UpstreamPatch.query.count(),
             "last_git_activity": _latest_git_activity(),
