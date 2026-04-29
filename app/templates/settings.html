@@ -326,6 +326,18 @@
     }
   }
 
+  async function loadSettingsFromApi() {
+    try {
+      const res = await fetch('/api/settings');
+      if (!res.ok) return;
+      const data = await res.json();
+      document.getElementById('sslVerify').value = data.qgenie_ssl_verify || 'true';
+      document.getElementById('caBundle').value = data.qgenie_ca_bundle || '';
+    } catch (err) {
+      // ignore api preload failures
+    }
+  }
+
   async function addTrackedEmail() {
     const input = document.getElementById('newTrackedEmail');
     const email = (input.value || '').trim();
@@ -424,6 +436,7 @@
   renderExtraPaths();
   loadTrackedEmails();
   validateCheckpatchPath();
+  loadSettingsFromApi();
 
   ['ssl-verify-field', 'ca-bundle-field'].forEach(function (id) {
     if (!document.querySelector('[data-testid="' + id + '"]')) {

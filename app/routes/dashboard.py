@@ -452,6 +452,22 @@ def save_settings():
     return jsonify({"ok": True, "success": True, "message": "Settings saved"})
 
 
+@dashboard_bp.get("/api/settings")
+def get_settings():
+    values = load_env_values()
+    return jsonify(
+        {
+            "display_name": values.get("USER_DISPLAY_NAME") or current_username(),
+            "qgenie_api_key": values.get("QGENIE_API_KEY", ""),
+            "qgenie_provider_url": values.get("QGENIE_PROVIDER_URL", Config.QGENIE_PROVIDER_URL),
+            "qgenie_ssl_verify": values.get("QGENIE_SSL_VERIFY", "true"),
+            "qgenie_ca_bundle": values.get("QGENIE_CA_BUNDLE", ""),
+            "default_model": values.get("QGENIE_DEFAULT_MODEL", get_default_model()),
+            "kernel_source_path": values.get("KERNEL_SRC_PATH", Config.KERNEL_SRC_PATH),
+        }
+    )
+
+
 @dashboard_bp.get("/api/validate_checkpatch")
 def validate_checkpatch():
     kernel_root = (request.args.get("path") or "").strip()
