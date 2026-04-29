@@ -14,7 +14,7 @@ from requests.auth import HTTPBasicAuth
 from flask import Blueprint, current_app, jsonify, render_template, request
 from sqlalchemy import inspect, text
 
-from app.config import Config, get_default_model
+from app.config import Config, MODEL_METADATA, get_available_models, get_default_model
 from app.models import db
 from app.services.env_service import load_env_values, resolve_ssl_verify
 from app.utils.driver_link_fetcher import DriverLinkFetcher
@@ -27,7 +27,13 @@ converter_api_bp = Blueprint("converter_api", __name__)
 
 @converter_bp.get("/")
 def converter_home():
-    return render_template("converter.html")
+    models = get_available_models()
+    return render_template(
+        "converter.html",
+        models=models,
+        model_metadata=MODEL_METADATA,
+        default_model=get_default_model(),
+    )
 
 
 def _ensure_converter_jobs_schema() -> None:
